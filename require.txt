@@ -1,0 +1,4 @@
+scrapy
+selenium
+tensoul
+gzip
