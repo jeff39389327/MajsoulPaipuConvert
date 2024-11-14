@@ -33,7 +33,7 @@ pip install -r requirements.txt
 ### **Step 2: Configuration**
 
 #### **2.1 Configure Web Scraping**
-Check the web elements at [Mahjong Soul Log House](https://amae-koromo.sapk.ch/)
+Check the web elements at [Mahjong Soul Log ](https://amae-koromo.sapk.ch/)
 
 **File Path:** `paipu_project/paipu_project/spiders/PaipuSpider.py`
 ```python
@@ -46,7 +46,16 @@ player_urls = [
 ]
 ```
 
-![Configuration Example](1.jpg)
+Example of web element:
+```html
+<a href="https://game.maj-soul.com/1/?paipu=241114-189aa3d7--2e3e83a76230_a78321430000" 
+   class="MuiTypography-root MuiTypography-inherit MuiLink-root MuiLink-underlineHover css-17xi075" 
+   title="查看牌谱" 
+   target="_blank" 
+   rel="noopener noreferrer">
+   0r0j50 [13000]
+</a>
+```
 
 #### **2.2 Set Mahjong Soul Credentials**
 **File Path:** `majsoul.py`
@@ -64,7 +73,7 @@ scrapy crawl paipu_spider
 
 Example output in `tonpuulist.txt`:
 ```
-241103-057ea444-a219-4202-930e-2d2472f4d6e6
+241103-057ea444-a219-4202-930e-2d2472f4d6e5444
 ```
 
 ### **Step 4: Process Game Logs**
@@ -72,7 +81,7 @@ Example output in `tonpuulist.txt`:
 2. Run **`toumajsoul.py`**
 
 Game logs will be saved in the `tonpuulog` directory.
-Example output: `241103-057ea444-a219-4202-930e-2d2472f4d6e6.json.gz`
+Example output: `241103-057ea444-a219-4202-930e-2d2472f4d6e44.json.gz`
 
 ### **Step 5: Validate Logs**
 ```bash
