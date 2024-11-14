@@ -2,3 +2,19 @@ log/
 new_log/
 tonpuulist.txt
 tonpuulog/
+majsoul.py
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 編譯檔案
+*.exe
+
+# IDE
+.vscode/
+.idea/
+
+# 環境相關
+venv/
+env/

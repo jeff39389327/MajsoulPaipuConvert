@@ -19,7 +19,7 @@ async def process_log(record_uuid):
         await asyncio.sleep(0.1)
 
 async def main():
-    username = "nogoc59706@paxnw.com"
+    username = "example@example.com"
     password = "48764876"
     batch_size = 1
     log_dir = r"tonpuulog"

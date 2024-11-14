@@ -1,0 +1,28 @@
+# 網路爬蟲相關
+scrapy==2.11.0
+selenium==4.16.0
+
+# 雀魂牌譜下載工具
+tensoul
+
+# 介面美化
+rich==13.7.0
+
+# 非同步處理
+asyncio==3.4.3
+
+# Chrome瀏覽器驅動
+webdriver-manager==4.0.1
+
+# 主要依賴項
+requests==2.31.0
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+
+# 其他工具依賴
+lxml==4.9.3
+urllib3==2.1.0
+pytz==2023.3.post1
+six==1.16.0
+idna==3.6
+charset-normalizer==3.3.2
