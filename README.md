@@ -58,7 +58,7 @@ Example of web element:
 ```
 
 #### **2.2 Set Mahjong Soul Credentials**
-**File Path:** `majsoul.py`
+**File Path:** `toumajsoul.py`
 ```python
 username = "example@example.com"
 password = "12345678"
