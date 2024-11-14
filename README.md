@@ -3,7 +3,7 @@
 ## Integration Project
 **Convert Mahjong Soul game logs to MJAI format using mjai-reviewer and tensoul**
 
-This tool downloads game logs from Mahjong Soul's log warehouse and converts them to the MJAI format.
+This tool downloads game logs from MajSoul Stats and converts them to the MJAI format.
 
 ## ⚠️ Important Notes
 - This tool collects data from third-party websites and games
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 ### **Step 2: Configuration**
 
 #### **2.1 Configure Web Scraping**
-Check the web elements at [Mahjong Soul Log ](https://amae-koromo.sapk.ch/)
+Check the web elements at [MajSoul Stats](https://amae-koromo.sapk.ch/)
 
 **File Path:** `paipu_project/paipu_project/spiders/PaipuSpider.py`
 ```python
@@ -48,7 +48,7 @@ player_urls = [
 
 Example of web element:
 ```html
-<a href="https://game.maj-soul.com/1/?paipu=241114-189aa3d7--2e3e83a76230_a78321430000" 
+<a href="https://game.maj-soul.com/1/?paipu=241114-189aa3d7--2e3e83a76230_a7832143000" 
    class="MuiTypography-root MuiTypography-inherit MuiLink-root MuiLink-underlineHover css-17xi075" 
    title="查看牌谱" 
    target="_blank" 
@@ -73,7 +73,7 @@ scrapy crawl paipu_spider
 
 Example output in `tonpuulist.txt`:
 ```
-241103-057ea444-a219-4202-930e-2d2472f4d6e5444
+241103-057ea444-a219-4202-930e-2d2472f4d6e600
 ```
 
 ### **Step 4: Process Game Logs**
@@ -81,7 +81,7 @@ Example output in `tonpuulist.txt`:
 2. Run **`toumajsoul.py`**
 
 Game logs will be saved in the `tonpuulog` directory.
-Example output: `241103-057ea444-a219-4202-930e-2d2472f4d6e44.json.gz`
+Example output: `241103-057ea444-a219-4202-930e-2d2472f4d6e600.json.gz`
 
 ### **Step 5: Validate Logs**
 ```bash
@@ -93,7 +93,7 @@ This project incorporates code from mjai-reviewer under the Apache-2.0 license.
 
 ## Acknowledgments
 - [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) - Game log analysis tool
-- [Mahjong Soul Log House](https://amae-koromo.sapk.ch/) - Data source
+- [MajSoul Stats](https://amae-koromo.sapk.ch/) - Data source
 
 ## Contributing
 Issues and pull requests are welcome. Please ensure proper attribution and licensing compliance when contributing.
