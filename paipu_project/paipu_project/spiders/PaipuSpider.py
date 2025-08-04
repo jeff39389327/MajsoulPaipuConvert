@@ -420,7 +420,7 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
 class PaipuSpider(scrapy.Spider):
     name = "paipu_spider"
 
-    def __init__(self, config_path: str = "crawler_config.json"):
+    def __init__(self, config_path: str = "crawler_config.json", use_manual_urls: bool = False):
         # 載入配置
         self.config = CrawlerConfig.from_json(config_path)
         self.config.validate()
@@ -428,15 +428,35 @@ class PaipuSpider(scrapy.Spider):
         self.manager = multiprocessing.Manager()
         self.processed_paipu_ids = self.manager.list()
         
-        # 根據配置取得玩家URLs
-        print("正在根據配置取得玩家URLs...")
-        print(f"配置摘要:")
-        print(f"  時間段: {[get_period_display_name(p) for p in self.config.time_periods]}")
-        print(f"  段位: {[get_rank_display_name(r) for r in self.config.ranks]}")
-        print(f"  每個時間段最多玩家數: {self.config.max_players_per_period}")
-        print(f"  牌譜限制: {self.config.paipu_limit}")
+        # 決定使用自動化還是手動配置
+        if use_manual_urls or hasattr(self, 'manual_player_urls'):
+            print("🔧 使用 Legacy Manual 模式...")
+            print("從程式碼中讀取手動設定的玩家URLs")
+            
+            # Legacy Manual URLs (在這裡手動添加玩家URLs)
+            manual_urls = getattr(self, 'manual_player_urls', [
+                # 在這裡添加手動玩家URLs，例如：
+                # "https://amae-koromo.sapk.ch/player/123456/12?limit=9999",
+                # "https://amae-koromo.sapk.ch/player/789012/12?limit=9999",
+            ])
+            
+            if manual_urls:
+                self.player_urls = manual_urls
+                print(f"已載入 {len(self.player_urls)} 個手動設定的玩家URLs")
+            else:
+                print("⚠️  未找到手動設定的玩家URLs，切換到自動化模式")
+                use_manual_urls = False
         
-        self.player_urls = get_top_players_urls(self.config)
+        if not use_manual_urls:
+            print("🚀 使用自動化配置模式...")
+            print(f"配置摘要:")
+            print(f"  時間段: {[get_period_display_name(p) for p in self.config.time_periods]}")
+            print(f"  段位: {[get_rank_display_name(r) for r in self.config.ranks]}")
+            print(f"  每個時間段最多玩家數: {self.config.max_players_per_period}")
+            print(f"  牌譜限制: {self.config.paipu_limit}")
+            
+            self.player_urls = get_top_players_urls(self.config)
+        
         self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
 
         # 讀取已有的牌譜ID
@@ -508,7 +528,43 @@ def create_default_config():
     print("已建立預設配置檔案: crawler_config.json")
     return config
 
+# ==========================================
+# Legacy Manual 使用範例
+# ==========================================
+
+class ManualPaipuSpider(PaipuSpider):
+    """手動配置玩家URLs的Spider類別"""
+    
+    def __init__(self):
+        # 手動設定玩家URLs（Legacy方式）
+        self.manual_player_urls = [
+            "https://amae-koromo.sapk.ch/player/123456789/12?limit=9999",
+            "https://amae-koromo.sapk.ch/player/987654321/12?limit=9999",
+            "https://amae-koromo.sapk.ch/player/555666777/12?limit=9999",
+            # 在這裡添加更多玩家URLs...
+        ]
+        
+        # 呼叫父類初始化，啟用手動模式
+        super().__init__(use_manual_urls=True)
+
+# ==========================================
+# 使用說明和執行方式
+# ==========================================
+
 if __name__ == "__main__":
+    # 方式1：自動化配置模式（推薦）
+    # 使用 crawler_config.json 配置檔案
+    # 執行命令：scrapy crawl paipu_spider
+    
+    # 方式2：Legacy Manual 模式
+    # 1. 修改上面的 manual_player_urls 列表
+    # 2. 註冊新的spider：在 settings.py 或直接執行
+    # 3. 執行命令：scrapy crawl manual_paipu_spider
+    
+    # 方式3：混合模式 - 在現有程式中直接設定
+    # spider = PaipuSpider(use_manual_urls=True)
+    # spider.manual_player_urls = ["URL1", "URL2", ...]
+    
     # 如果配置檔案不存在，建立預設配置
     import os
     if not os.path.exists("crawler_config.json"):
