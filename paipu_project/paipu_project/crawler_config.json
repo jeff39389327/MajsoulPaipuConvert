@@ -1,0 +1,10 @@
+{
+  "time_periods": ["4w", "1w", "3d", "1d"],
+  "ranks": ["Jade"],
+  "max_players_per_period": 9999,
+  "paipu_limit": 9999,
+  "output_filename": "list.txt",
+  "headless_mode": true,
+  "save_screenshots": true
+}
+
