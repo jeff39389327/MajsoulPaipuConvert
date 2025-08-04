@@ -15,11 +15,17 @@ from typing import List, Dict
 @dataclass
 class CrawlerConfig:
     """爬蟲配置類"""
-    # 時間段設定 (可選: "4w", "1w", "3d", "1d")
-    time_periods: List[str]
+    # 爬蟲模式選擇: "auto" 或 "manual"
+    crawler_mode: str = "auto"
     
-    # 段位設定 (可選: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All")
-    ranks: List[str]
+    # 手動模式：玩家URLs列表 (當 crawler_mode = "manual" 時使用)
+    manual_player_urls: List[str] = None
+    
+    # 自動模式：時間段設定 (可選: "4w", "1w", "3d", "1d")
+    time_periods: List[str] = None
+    
+    # 自動模式：段位設定 (可選: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All")
+    ranks: List[str] = None
     
     # 每個時間段最多抓取的玩家數量
     max_players_per_period: int = 20
@@ -51,6 +57,8 @@ class CrawlerConfig:
     def get_default_config(cls):
         """取得預設配置"""
         return cls(
+            crawler_mode="auto",
+            manual_player_urls=[],
             time_periods=["4w", "1w", "3d"],
             ranks=["Gold"],
             max_players_per_period=20,
@@ -62,25 +70,53 @@ class CrawlerConfig:
     
     def save_to_json(self, json_path: str):
         """儲存配置到JSON檔案"""
+        # 處理 None 值，轉換為空列表以便於JSON序列化
+        config_dict = self.__dict__.copy()
+        if config_dict.get('manual_player_urls') is None:
+            config_dict['manual_player_urls'] = []
+        if config_dict.get('time_periods') is None:
+            config_dict['time_periods'] = []
+        if config_dict.get('ranks') is None:
+            config_dict['ranks'] = []
+            
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(self.__dict__, f, ensure_ascii=False, indent=2)
+            json.dump(config_dict, f, ensure_ascii=False, indent=2)
     
     def validate(self):
         """驗證配置的有效性"""
+        valid_modes = ["auto", "manual"]
         valid_periods = ["4w", "1w", "3d", "1d"]
         valid_ranks = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All"]
         
-        # 驗證時間段
-        for period in self.time_periods:
-            if period not in valid_periods:
-                raise ValueError(f"無效的時間段: {period}。有效選項: {valid_periods}")
+        # 驗證爬蟲模式
+        if self.crawler_mode not in valid_modes:
+            raise ValueError(f"無效的爬蟲模式: {self.crawler_mode}。有效選項: {valid_modes}")
         
-        # 驗證段位
-        for rank in self.ranks:
-            if rank not in valid_ranks:
-                raise ValueError(f"無效的段位: {rank}。有效選項: {valid_ranks}")
+        # 根據模式驗證對應參數
+        if self.crawler_mode == "manual":
+            if not self.manual_player_urls or len(self.manual_player_urls) == 0:
+                raise ValueError("手動模式需要提供 manual_player_urls")
+            print(f"✅ 手動模式配置驗證通過 - 已設定 {len(self.manual_player_urls)} 個玩家URLs")
+            
+        elif self.crawler_mode == "auto":
+            if not self.time_periods or len(self.time_periods) == 0:
+                raise ValueError("自動模式需要提供 time_periods")
+            if not self.ranks or len(self.ranks) == 0:
+                raise ValueError("自動模式需要提供 ranks")
+                
+            # 驗證時間段
+            for period in self.time_periods:
+                if period not in valid_periods:
+                    raise ValueError(f"無效的時間段: {period}。有效選項: {valid_periods}")
+            
+            # 驗證段位
+            for rank in self.ranks:
+                if rank not in valid_ranks:
+                    raise ValueError(f"無效的段位: {rank}。有效選項: {valid_ranks}")
+            
+            print(f"✅ 自動模式配置驗證通過")
         
-        print("✅ 配置驗證通過")
+        print("✅ 總體配置驗證通過")
 
 def get_rank_display_name(rank: str) -> Dict[str, str]:
     """取得段位的顯示名稱對應"""
@@ -420,7 +456,7 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
 class PaipuSpider(scrapy.Spider):
     name = "paipu_spider"
 
-    def __init__(self, config_path: str = "crawler_config.json", use_manual_urls: bool = False):
+    def __init__(self, config_path: str = "crawler_config.json"):
         # 載入配置
         self.config = CrawlerConfig.from_json(config_path)
         self.config.validate()
@@ -428,26 +464,28 @@ class PaipuSpider(scrapy.Spider):
         self.manager = multiprocessing.Manager()
         self.processed_paipu_ids = self.manager.list()
         
-        # 決定使用自動化還是手動配置
-        if use_manual_urls or hasattr(self, 'manual_player_urls'):
-            print("🔧 使用 Legacy Manual 模式...")
-            print("從程式碼中讀取手動設定的玩家URLs")
+        # 根據配置模式決定使用方式
+        if self.config.crawler_mode == "manual":
+            print("🔧 使用 Manual 模式（Legacy相容）...")
+            print(f"從配置檔案中讀取 {len(self.config.manual_player_urls)} 個手動設定的玩家URLs")
             
-            # Legacy Manual URLs (在這裡手動添加玩家URLs)
-            manual_urls = getattr(self, 'manual_player_urls', [
-                # 在這裡添加手動玩家URLs，例如：
-                # "https://amae-koromo.sapk.ch/player/123456/12?limit=9999",
-                # "https://amae-koromo.sapk.ch/player/789012/12?limit=9999",
-            ])
+            # 使用配置檔案中的手動URLs
+            self.player_urls = []
+            for url in self.config.manual_player_urls:
+                # 確保URL格式正確，添加limit參數
+                if "/player/" in url and "?limit=" not in url:
+                    url = f"{url}?limit={self.config.paipu_limit}"
+                elif "/player/" in url and "?limit=" in url:
+                    # URL已經有limit參數，使用原始URL
+                    pass
+                else:
+                    print(f"⚠️  跳過無效的URL格式: {url}")
+                    continue
+                self.player_urls.append(url)
             
-            if manual_urls:
-                self.player_urls = manual_urls
-                print(f"已載入 {len(self.player_urls)} 個手動設定的玩家URLs")
-            else:
-                print("⚠️  未找到手動設定的玩家URLs，切換到自動化模式")
-                use_manual_urls = False
-        
-        if not use_manual_urls:
+            print(f"已載入 {len(self.player_urls)} 個有效的玩家URLs")
+            
+        else:  # auto mode
             print("🚀 使用自動化配置模式...")
             print(f"配置摘要:")
             print(f"  時間段: {[get_period_display_name(p) for p in self.config.time_periods]}")
@@ -529,46 +567,40 @@ def create_default_config():
     return config
 
 # ==========================================
-# Legacy Manual 使用範例
-# ==========================================
-
-class ManualPaipuSpider(PaipuSpider):
-    """手動配置玩家URLs的Spider類別"""
-    
-    def __init__(self):
-        # 手動設定玩家URLs（Legacy方式）
-        self.manual_player_urls = [
-            "https://amae-koromo.sapk.ch/player/123456789/12?limit=9999",
-            "https://amae-koromo.sapk.ch/player/987654321/12?limit=9999",
-            "https://amae-koromo.sapk.ch/player/555666777/12?limit=9999",
-            # 在這裡添加更多玩家URLs...
-        ]
-        
-        # 呼叫父類初始化，啟用手動模式
-        super().__init__(use_manual_urls=True)
-
-# ==========================================
 # 使用說明和執行方式
 # ==========================================
 
 if __name__ == "__main__":
     # 方式1：自動化配置模式（推薦）
-    # 使用 crawler_config.json 配置檔案
+    # 在 crawler_config.json 中設定：
+    # {
+    #   "crawler_mode": "auto",
+    #   "time_periods": ["4w", "1w", "3d"],
+    #   "ranks": ["Gold"],
+    #   ...
+    # }
     # 執行命令：scrapy crawl paipu_spider
     
-    # 方式2：Legacy Manual 模式
-    # 1. 修改上面的 manual_player_urls 列表
-    # 2. 註冊新的spider：在 settings.py 或直接執行
-    # 3. 執行命令：scrapy crawl manual_paipu_spider
-    
-    # 方式3：混合模式 - 在現有程式中直接設定
-    # spider = PaipuSpider(use_manual_urls=True)
-    # spider.manual_player_urls = ["URL1", "URL2", ...]
+    # 方式2：手動模式（Legacy Manual 相容）
+    # 在 crawler_config.json 中設定：
+    # {
+    #   "crawler_mode": "manual",
+    #   "manual_player_urls": [
+    #     "https://amae-koromo.sapk.ch/player/123456/12",
+    #     "https://amae-koromo.sapk.ch/player/789012/12"
+    #   ],
+    #   ...
+    # }
+    # 執行命令：scrapy crawl paipu_spider
     
     # 如果配置檔案不存在，建立預設配置
     import os
     if not os.path.exists("crawler_config.json"):
         create_default_config()
-        print("請編輯 crawler_config.json 來自訂您的抓取設定")
+        print("已建立預設配置檔案: crawler_config.json")
+        print("請編輯配置檔案來自訂您的抓取設定")
+        print("\n📋 可用的配置模式:")
+        print("  - crawler_mode: 'auto' (自動化) 或 'manual' (手動)")
+        print("  - 詳細設定請參考配置檔案中的範例")
     else:
         print("發現現有配置檔案: crawler_config.json")
