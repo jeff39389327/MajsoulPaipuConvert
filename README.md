@@ -14,11 +14,13 @@ This tool downloads game logs from MajSoul Stats and converts them to the MJAI f
 > If you find any missing attributions or licensing issues, please submit an ISSUE. Your feedback helps us maintain proper attribution and licensing compliance.
 
 ## ✨ New Features
-- 🎯 **Configurable Crawler**: Flexible targeting by time periods and ranks
+- 🎯 **Unified Configuration**: Single JSON config file for all modes
+- 🔄 **Mode Switching**: Easily switch between auto/manual modes 
 - 🚀 **Automated Collection**: Auto-collect from ranking leaderboards
 - 📊 **Multi-Rank Support**: Throne/Jade/Gold + East variants
 - ⏰ **Multi-Period**: 4w/1w/3d/1d rankings
-- 🔧 **JSON Configuration**: Easy setup through config files
+- 🔧 **Legacy Compatible**: Full support for manual player selection
+- 📝 **Validation**: Automatic configuration validation with helpful error messages
 
 ## Prerequisites
 Before installation, ensure you have:
@@ -43,11 +45,16 @@ pip install scrapy selenium
 
 ### **Step 2: Configuration**
 
-#### **2.1 Configure Crawler Settings (New!)**
+#### **2.1 Configure Crawler Settings**
 Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` directory:
 
+**🎯 Choose Your Mode:**
+
+**Option A: Automated Mode (Recommended)**
 ```json
 {
+  "crawler_mode": "auto",
+  "manual_player_urls": [],
   "time_periods": ["4w", "1w", "3d"],
   "ranks": ["Gold"],
   "max_players_per_period": 20,
@@ -58,12 +65,33 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
+**Option B: Manual Mode (Legacy Compatible)**
+```json
+{
+  "crawler_mode": "manual",
+  "manual_player_urls": [
+    "https://amae-koromo.sapk.ch/player/123456789/12",
+    "https://amae-koromo.sapk.ch/player/987654321/12",
+    "https://amae-koromo.sapk.ch/player/555666777/12"
+  ],
+  "time_periods": [],
+  "ranks": [],
+  "max_players_per_period": 20,
+  "paipu_limit": 9999,
+  "output_filename": "manual_paipu.txt",
+  "headless_mode": true,
+  "save_screenshots": false
+}
+```
+
 **Configuration Parameters:**
 
 | Parameter | Description | Options | Default |
 |-----------|-------------|---------|---------|
-| `time_periods` | Time periods to crawl | `"4w"`, `"1w"`, `"3d"`, `"1d"` | `["4w", "1w", "3d"]` |
-| `ranks` | Rank tiers to target | `"Throne"`, `"Jade"`, `"Gold"`, `"Throne East"`, `"Jade East"`, `"Gold East"`, `"All"` | `["Gold"]` |
+| `crawler_mode` | **Crawler mode** | `"auto"`, `"manual"` | `"auto"` |
+| `manual_player_urls` | **Manual player URLs** (for manual mode) | Array of player URLs | `[]` |
+| `time_periods` | Time periods to crawl (for auto mode) | `"4w"`, `"1w"`, `"3d"`, `"1d"` | `["4w", "1w", "3d"]` |
+| `ranks` | Rank tiers to target (for auto mode) | `"Throne"`, `"Jade"`, `"Gold"`, `"Throne East"`, `"Jade East"`, `"Gold East"`, `"All"` | `["Gold"]` |
 | `max_players_per_period` | Players per time period | 1-50 | `20` |
 | `paipu_limit` | Game logs per player | Any positive integer | `9999` |
 | `output_filename` | Output file name | Any filename | `"tonpuulist.txt"` |
@@ -75,9 +103,10 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 <details>
 <summary>📋 Click to expand configuration examples</summary>
 
-**Quick Test Configuration:**
+**Quick Test Configuration (Auto Mode):**
 ```json
 {
+  "crawler_mode": "auto",
   "time_periods": ["3d"],
   "ranks": ["Gold"],
   "max_players_per_period": 5,
@@ -88,9 +117,10 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
-**Throne-Only Configuration:**
+**Throne-Only Configuration (Auto Mode):**
 ```json
 {
+  "crawler_mode": "auto",
   "time_periods": ["1w", "3d"],
   "ranks": ["Throne"],
   "max_players_per_period": 15,
@@ -101,9 +131,10 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
-**Complete Dataset Collection:**
+**Complete Dataset Collection (Auto Mode):**
 ```json
 {
+  "crawler_mode": "auto",
   "time_periods": ["4w", "1w", "3d", "1d"],
   "ranks": ["All"],
   "max_players_per_period": 30,
@@ -114,9 +145,26 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
-**East Room Focused:**
+**Manual Player Selection (Manual Mode - Legacy Compatible):**
 ```json
 {
+  "crawler_mode": "manual",
+  "manual_player_urls": [
+    "https://amae-koromo.sapk.ch/player/123456789/12",
+    "https://amae-koromo.sapk.ch/player/987654321/12",
+    "https://amae-koromo.sapk.ch/player/555666777/12"
+  ],
+  "paipu_limit": 9999,
+  "output_filename": "manual_selection.txt",
+  "headless_mode": true,
+  "save_screenshots": false
+}
+```
+
+**East Room Focused (Auto Mode):**
+```json
+{
+  "crawler_mode": "auto",
   "time_periods": ["1w"],
   "ranks": ["Throne East", "Jade East", "Gold East"],
   "max_players_per_period": 20,
@@ -129,18 +177,7 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 
 </details>
 
-#### **2.2 Legacy Manual Configuration (Optional)**
-For manual player targeting, you can still modify:
-**File Path:** `paipu_project/paipu_project/spiders/PaipuSpider.py`
-
-```python
-# Manual player URLs (if not using auto-crawler)
-player_urls = [
-    # Add specific player URLs here
-]
-```
-
-#### **2.3 Set Mahjong Soul Credentials**
+#### **2.2 Set Mahjong Soul Credentials**
 **File Path:** `toumajsoul.py`
 ```python
 username = "example@example.com"
@@ -149,24 +186,39 @@ password = "12345678"
 
 ### **Step 3: Collect Game IDs**
 
-#### **Option A: Automated Crawler (Recommended)**
 Navigate to the paipu_project directory and run:
 ```bash
 cd paipu_project
 scrapy crawl paipu_spider
 ```
 
-The crawler will:
+The crawler will automatically detect your configuration mode:
+
+**🚀 Auto Mode Output:**
+```
+🚀 使用自動化配置模式...
+配置摘要:
+  時間段: 四週, 一週, 三天
+  段位: 金
+  每個時間段最多玩家數: 20
+```
 - ✅ Automatically visit [MajSoul Stats Rankings](https://amae-koromo.sapk.ch/ranking/delta)
 - ⚙️ Apply your configuration settings (time periods, ranks)
 - 📊 Collect from Positive ranking leaderboards
 - 💾 Save game IDs to your configured output file
 - 📸 Optionally save verification screenshots
 
-**Output:** Game IDs saved to `tonpuulist.txt` (or your configured filename)
+**🔧 Manual Mode Output:**
+```
+🔧 使用 Manual 模式（Legacy相容）...
+從配置檔案中讀取 3 個手動設定的玩家URLs
+已載入 3 個有效的玩家URLs
+```
+- ✅ Use your manually specified player URLs
+- 🎯 Collect game logs from specific players
+- 💾 Save game IDs to your configured output file
 
-#### **Option B: Manual Configuration (Legacy)**
-Manually configure specific players in the spider code and run the same command.
+**Output:** Game IDs saved to `tonpuulist.txt` (or your configured filename)
 
 Example output in `tonpuulist.txt`:
 ```
@@ -225,7 +277,9 @@ pip install -r requirements.txt
 pip install scrapy selenium
 
 # 2. Configure crawler (edit crawler_config.json)
-# 3. Collect game IDs
+#    Choose either "auto" or "manual" mode
+
+# 3. Collect game IDs (unified command for both modes)
 cd paipu_project
 scrapy crawl paipu_spider
 
@@ -237,13 +291,41 @@ python toumajsoul.py
 validate_logs.exe tonpuulog
 ```
 
+## 🔄 Switching Between Modes
+
+**To switch from Auto to Manual mode:**
+```json
+{
+  "crawler_mode": "manual",  // Changed from "auto"
+  "manual_player_urls": [    // Add your specific player URLs
+    "https://amae-koromo.sapk.ch/player/123456789/12",
+    "https://amae-koromo.sapk.ch/player/987654321/12"
+  ],
+  "time_periods": [],        // Leave empty for manual mode
+  "ranks": []                // Leave empty for manual mode
+}
+```
+
+**To switch from Manual to Auto mode:**
+```json
+{
+  "crawler_mode": "auto",    // Changed from "manual"
+  "manual_player_urls": [],  // Leave empty for auto mode
+  "time_periods": ["1w"],    // Set your desired time periods
+  "ranks": ["Gold"]          // Set your desired ranks
+}
+```
+
+No code changes required - just edit the configuration file and run the same command!
+
 ## ⚠️ Troubleshooting
 
 **Common Issues:**
 - **ChromeDriver error**: Ensure ChromeDriver version matches Chrome browser
-- **Empty results**: Check network connection and configuration settings
-- **Process hanging**: Verify credentials in `toumajsoul.py`
+- **Empty results**: Check network connection and verify configuration mode/settings
+- **Process hanging**: For auto mode, verify network access to rankings site; for manual mode, check player URLs format
 - **Rate limiting**: Adjust `max_players_per_period` if experiencing timeouts
+- **Configuration errors**: The program will validate and show specific error messages for invalid configurations
 
 ## License
 This project incorporates code from mjai-reviewer under the Apache-2.0 license.
