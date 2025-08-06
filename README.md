@@ -83,7 +83,7 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
   "save_screenshots": false
 }
 ```
-**Option B: Date Room Mode (Date Range Collection)**
+**Option C: Date Room Mode (Date Range Collection)**
 ```json
 {
   "crawler_mode": "date_room",
