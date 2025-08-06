@@ -11,11 +11,16 @@ import re
 import json
 from dataclasses import dataclass
 from typing import List, Dict
+from datetime import datetime, timedelta
+import subprocess
+import sys
+import os
+import tempfile
 
 @dataclass
 class CrawlerConfig:
     """爬蟲配置類"""
-    # 爬蟲模式選擇: "auto" 或 "manual"
+    # 爬蟲模式選擇: "auto", "manual", 或 "date_room"
     crawler_mode: str = "auto"
     
     # 手動模式：玩家URLs列表 (當 crawler_mode = "manual" 時使用)
@@ -32,6 +37,11 @@ class CrawlerConfig:
     
     # 牌譜數量限制參數
     paipu_limit: int = 9999
+    
+    # date_room模式：日期區間和目標房間
+    start_date: str = None  # 格式: "2019-08-20"
+    end_date: str = None    # 格式: "2019-08-23"
+    target_room: str = None # 可選: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"
     
     # 輸出檔案名稱
     output_filename: str = "tonpuulist.txt"
@@ -65,7 +75,10 @@ class CrawlerConfig:
             paipu_limit=9999,
             output_filename="tonpuulist.txt",
             headless_mode=True,
-            save_screenshots=True
+            save_screenshots=True,
+            start_date=None,
+            end_date=None,
+            target_room=None
         )
     
     def save_to_json(self, json_path: str):
@@ -84,9 +97,10 @@ class CrawlerConfig:
     
     def validate(self):
         """驗證配置的有效性"""
-        valid_modes = ["auto", "manual"]
+        valid_modes = ["auto", "manual", "date_room"]
         valid_periods = ["4w", "1w", "3d", "1d"]
         valid_ranks = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All"]
+        valid_rooms = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"]
         
         # 驗證爬蟲模式
         if self.crawler_mode not in valid_modes:
@@ -115,6 +129,30 @@ class CrawlerConfig:
                     raise ValueError(f"無效的段位: {rank}。有效選項: {valid_ranks}")
             
             print(f"✅ 自動模式配置驗證通過")
+            
+        elif self.crawler_mode == "date_room":
+            # 驗證日期格式和必要參數
+            if not self.start_date or not self.end_date:
+                raise ValueError("date_room模式需要提供 start_date 和 end_date")
+            if not self.target_room:
+                raise ValueError("date_room模式需要提供 target_room")
+                
+            # 驗證日期格式
+            try:
+                start = datetime.strptime(self.start_date, "%Y-%m-%d")
+                end = datetime.strptime(self.end_date, "%Y-%m-%d")
+                if start > end:
+                    raise ValueError("start_date 不能晚於 end_date")
+            except ValueError as e:
+                raise ValueError(f"日期格式錯誤（應為YYYY-MM-DD）: {e}")
+            
+            # 驗證房間
+            if self.target_room not in valid_rooms:
+                raise ValueError(f"無效的房間: {self.target_room}。有效選項: {valid_rooms}")
+            
+            print(f"✅ date_room模式配置驗證通過")
+            print(f"  日期範圍: {self.start_date} 到 {self.end_date}")
+            print(f"  目標房間: {self.target_room}")
         
         print("✅ 總體配置驗證通過")
 
@@ -140,6 +178,150 @@ def get_period_display_name(period: str) -> str:
         "1d": "一天"
     }
     return period_mapping.get(period, period)
+
+def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True) -> List[str]:
+    """
+    執行date_room_extractor.py並獲取其輸出的牌譜ID列表
+    
+    Args:
+        target_date: 目標日期 (格式: "2019-08-23")
+        target_room: 目標房間 (如: "Throne", "Jade", "Gold" 等)
+        headless_mode: 是否使用無頭模式
+        
+    Returns:
+        牌譜ID列表
+    """
+    # 創建臨時的date_room_extractor.py修改版本
+    temp_script = """
+import sys
+sys.path.insert(0, '.')
+from date_room_extractor import OptimizedPaipuExtractor, convert_ranks_to_english
+
+def main():
+    # 參數設定
+    target_date = "{target_date}"
+    target_ranks = ["{target_room}"]
+    max_paipus = 99999
+    headless_mode = {headless_mode}
+    
+    target_ranks = convert_ranks_to_english(target_ranks)
+    
+    extractor = OptimizedPaipuExtractor(headless=headless_mode)
+    
+    try:
+        results = extractor.extract_from_rooms(
+            target_date=target_date,
+            target_ranks=target_ranks,
+            max_paipus=max_paipus
+        )
+        
+        # 只輸出牌譜ID，每行一個
+        for paipu in results:
+            print(paipu)
+        
+    finally:
+        extractor.close()
+
+if __name__ == "__main__":
+    main()
+""".format(
+        target_date=target_date,
+        target_room=target_room,
+        headless_mode=str(headless_mode)
+    )
+    
+    # 創建臨時檔案
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
+        temp_file.write(temp_script)
+        temp_file_path = temp_file.name
+    
+    try:
+        # 執行臨時腳本
+        result = subprocess.run(
+            [sys.executable, temp_file_path],
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        
+        if result.returncode != 0:
+            print(f"執行date_room_extractor.py時出錯: {result.stderr}")
+            return []
+        
+        # 解析輸出，每行一個牌譜ID
+        paipu_ids = []
+        for line in result.stdout.strip().split('\n'):
+            line = line.strip()
+            # 過濾掉非牌譜ID的輸出（如print的調試信息）
+            if line and re.match(r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', line):
+                paipu_ids.append(line)
+        
+        return paipu_ids
+        
+    finally:
+        # 刪除臨時檔案
+        try:
+            os.unlink(temp_file_path)
+        except:
+            pass
+
+def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
+    """使用date_room模式收集牌譜"""
+    all_paipus = []
+    
+    try:
+        # 解析日期範圍
+        start_date = datetime.strptime(config.start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(config.end_date, "%Y-%m-%d")
+        
+        # 計算總天數
+        total_days = (end_date - start_date).days + 1
+        print(f"\n=== 開始 date_room 模式收集 ===")
+        print(f"日期範圍: {config.start_date} 到 {config.end_date} (共 {total_days} 天)")
+        print(f"目標房間: {config.target_room}")
+        print(f"無頭模式: {config.headless_mode}")
+        print("="*50)
+        
+        # 處理每一天
+        current_date = start_date
+        day_count = 0
+        
+        while current_date <= end_date:
+            day_count += 1
+            date_str = current_date.strftime("%Y-%m-%d")
+            print(f"\n[{day_count}/{total_days}] 正在處理日期: {date_str}")
+            
+            # 執行date_room_extractor.py獲取當天的牌譜
+            day_results = execute_date_room_extractor_py(
+                target_date=date_str,
+                target_room=config.target_room,
+                headless_mode=config.headless_mode
+            )
+            
+            # 添加到總列表（date_room_extractor.py已經去重，但這裡再次確保跨日期的去重）
+            for paipu in day_results:
+                if paipu not in all_paipus:
+                    all_paipus.append(paipu)
+            
+            print(f"  ✓ {date_str} 收集到 {len(day_results)} 個牌譜")
+            print(f"  累計收集: {len(all_paipus)} 個不重複牌譜")
+            
+            # 移到下一天
+            current_date += timedelta(days=1)
+            
+            # 如果不是最後一天，稍微等待一下
+            if current_date <= end_date:
+                time.sleep(1)
+        
+        print(f"\n=== date_room 模式收集完成 ===")
+        print(f"總計收集到 {len(all_paipus)} 個不重複的牌譜ID")
+        
+    except Exception as e:
+        print(f"date_room模式執行出錯: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return all_paipus
 
 def setup_rank_selection(driver, target_ranks: List[str]):
     """設定段位選擇"""
@@ -484,6 +666,13 @@ class PaipuSpider(scrapy.Spider):
                 self.player_urls.append(url)
             
             print(f"已載入 {len(self.player_urls)} 個有效的玩家URLs")
+            self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
+            
+        elif self.config.crawler_mode == "date_room":
+            print("📅 使用 date_room 模式...")
+            # date_room模式不需要player_urls
+            self.player_urls = []
+            self.player_counts = self.manager.dict()
             
         else:  # auto mode
             print("🚀 使用自動化配置模式...")
@@ -494,10 +683,9 @@ class PaipuSpider(scrapy.Spider):
             print(f"  牌譜限制: {self.config.paipu_limit}")
             
             self.player_urls = get_top_players_urls(self.config)
-        
-        self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
+            self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
 
-        # 讀取已有的牌譜ID
+        # 讀取已有的牌譜ID（所有模式都需要）
         try:
             with open(self.config.output_filename, "r") as file:
                 for line in file:
@@ -512,37 +700,58 @@ class PaipuSpider(scrapy.Spider):
         yield scrapy.Request(url="https://amae-koromo.sapk.ch", callback=self.start_crawling)
 
     def start_crawling(self, response):
-        print(f"開始處理 {len(self.player_urls)} 個玩家...")
-        
-        processes = []
-        for url in self.player_urls:
-            process = multiprocessing.Process(target=process_player, args=(url, self.processed_paipu_ids, self.player_counts, self.config))
-            processes.append(process)
-            process.start()
+        if self.config.crawler_mode == "date_room":
+            # date_room模式：直接調用收集函數
+            date_room_paipus = collect_paipus_by_date_room(self.config)
+            
+            # 添加到processed_paipu_ids中（避免重複）
+            for paipu_id in date_room_paipus:
+                if paipu_id not in self.processed_paipu_ids:
+                    self.processed_paipu_ids.append(paipu_id)
+            
+            # 直接結束
+            self.spider_closed(None)
+            
+        else:
+            # 原有的auto和manual模式處理
+            print(f"開始處理 {len(self.player_urls)} 個玩家...")
+            
+            processes = []
+            for url in self.player_urls:
+                process = multiprocessing.Process(target=process_player, args=(url, self.processed_paipu_ids, self.player_counts, self.config))
+                processes.append(process)
+                process.start()
 
-        for process in processes:
-            process.join()
+            for process in processes:
+                process.join()
 
-        self.spider_closed(None)
+            self.spider_closed(None)
 
     def spider_closed(self, reason):
         print(f"共收集到 {len(self.processed_paipu_ids)} 個不重複的牌譜ID")
-        print("各玩家收集到的牌譜ID數量:")
         
-        total_paipu = 0
-        for url in self.player_urls:
-            count = self.player_counts[url]
-            total_paipu += count
-            print(f"{url}: {count}")
+        if self.config.crawler_mode == "date_room":
+            print("\n📋 date_room模式配置摘要:")
+            print(f"  日期範圍: {self.config.start_date} 到 {self.config.end_date}")
+            print(f"  目標房間: {self.config.target_room}")
+        else:
+            print("各玩家收集到的牌譜ID數量:")
+            
+            total_paipu = 0
+            for url in self.player_urls:
+                count = self.player_counts[url]
+                total_paipu += count
+                print(f"{url}: {count}")
+            
+            print(f"\n總計收集牌譜數量: {total_paipu}")
+            
+            # 顯示配置摘要
+            if self.config.crawler_mode == "auto":
+                print(f"\n📋 使用的配置:")
+                print(f"  時間段: {', '.join([get_period_display_name(p) for p in self.config.time_periods])}")
+                print(f"  段位: {', '.join([get_rank_display_name(r) for r in self.config.ranks])}")
         
-        print(f"\n總計收集牌譜數量: {total_paipu}")
-        
-        # 顯示配置摘要
-        print(f"\n📋 使用的配置:")
-        print(f"  時間段: {', '.join([get_period_display_name(p) for p in self.config.time_periods])}")
-        print(f"  段位: {', '.join([get_rank_display_name(r) for r in self.config.ranks])}")
-        
-        if self.config.save_screenshots:
+        if self.config.save_screenshots and self.config.crawler_mode == "auto":
             print(f"\n📸 驗證截圖已儲存:")
             print(f"  - screenshot_rank_selection_verification.png (段位選擇驗證)")
             for period in self.config.time_periods:
@@ -564,6 +773,22 @@ def create_default_config():
     config = CrawlerConfig.get_default_config()
     config.save_to_json("crawler_config.json")
     print("已建立預設配置檔案: crawler_config.json")
+    return config
+
+# 建立date_room模式的範例配置
+def create_date_room_config_example():
+    """建立date_room模式的範例配置檔案"""
+    config = CrawlerConfig(
+        crawler_mode="date_room",
+        start_date="2019-08-20",
+        end_date="2019-08-23",
+        target_room="Jade",
+        output_filename="date_room_list.txt",
+        headless_mode=True,
+        save_screenshots=False
+    )
+    config.save_to_json("date_room_config_example.json")
+    print("已建立date_room模式範例配置檔案: date_room_config_example.json")
     return config
 
 # ==========================================
@@ -593,6 +818,19 @@ if __name__ == "__main__":
     # }
     # 執行命令：scrapy crawl paipu_spider
     
+    # 方式3：date_room模式（新增）
+    # 在 crawler_config.json 中設定：
+    # {
+    #   "crawler_mode": "date_room",
+    #   "start_date": "2019-08-20",
+    #   "end_date": "2019-08-23",
+    #   "target_room": "Jade",
+    #   "output_filename": "list.txt",
+    #   "headless_mode": true,
+    #   "save_screenshots": true
+    # }
+    # 執行命令：scrapy crawl paipu_spider
+    
     # 如果配置檔案不存在，建立預設配置
     import os
     if not os.path.exists("crawler_config.json"):
@@ -600,7 +838,13 @@ if __name__ == "__main__":
         print("已建立預設配置檔案: crawler_config.json")
         print("請編輯配置檔案來自訂您的抓取設定")
         print("\n📋 可用的配置模式:")
-        print("  - crawler_mode: 'auto' (自動化) 或 'manual' (手動)")
+        print("  - crawler_mode: 'auto' (自動化)")
+        print("  - crawler_mode: 'manual' (手動)")
+        print("  - crawler_mode: 'date_room' (日期房間模式)")
         print("  - 詳細設定請參考配置檔案中的範例")
+        
+        # 同時建立date_room模式的範例
+        if not os.path.exists("date_room_config_example.json"):
+            create_date_room_config_example()
     else:
         print("發現現有配置檔案: crawler_config.json")
