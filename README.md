@@ -50,7 +50,7 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 
 **🎯 Choose Your Mode:**
 
-**Option A: Automated Mode (Recommended)**
+**Option A: Automated Mode (For Positive Ranking crawling)**
 ```json
 {
   "crawler_mode": "auto",
@@ -65,7 +65,7 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
-**Option B: Manual Mode (Legacy Compatible)**
+**Option B: Manual Mode ( For Specific Player crawling)**
 ```json
 {
   "crawler_mode": "manual",
@@ -83,7 +83,7 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
   "save_screenshots": false
 }
 ```
-**Option C: Date Room Mode (Date Range Collection)**
+**Option C: Date Room Mode ( For Date Range Bulk crawling)**
 ```json
 {
   "crawler_mode": "date_room",
@@ -353,4 +353,5 @@ Issues and pull requests are welcome. Please ensure proper attribution and licen
 ---
 <div align="center">
 Created with ❤️ for the Mahjong community
+
 </div>
