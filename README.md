@@ -346,6 +346,7 @@ This project incorporates code from mjai-reviewer under the Apache-2.0 license.
 - [MajSoul Stats](https://amae-koromo.sapk.ch/) - Data source
 - [Scrapy](https://scrapy.org/) - Web scraping framework
 - [Selenium](https://selenium.dev/) - Browser automation
+- [Mortal](https://github.com/Equim-chan/Mortal)  - AI Engine
 
 ## Contributing
 Issues and pull requests are welcome. Please ensure proper attribution and licensing compliance when contributing.
@@ -355,3 +356,4 @@ Issues and pull requests are welcome. Please ensure proper attribution and licen
 Created with ❤️ for the Mahjong community
 
 </div>
+
