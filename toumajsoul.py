@@ -1,11 +1,29 @@
 import asyncio
 import json
 import os
-from tensoul import MajsoulPaipuDownloader
+import sys
 import gzip
 import time
 import subprocess
 from tqdm import tqdm
+import dotenv
+
+# 添加 standard-mjlog-converter 路徑
+sys.path.append('standard-mjlog-converter-main/standard-mjlog-converter-main')
+from py_mjlog_converter.fetch.majsoul import MahjongSoulAPI, fetch_majsoul
+
+def convert_protobuf_to_dict(obj):
+    """將 protobuf 對象轉換為可序列化的字典"""
+    if hasattr(obj, 'DESCRIPTOR'):
+        # 使用 MessageToDict 轉換 protobuf 對象
+        from google.protobuf.json_format import MessageToDict
+        return MessageToDict(obj, preserving_proto_field_name=True)
+    elif isinstance(obj, (list, tuple)):
+        return [convert_protobuf_to_dict(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_protobuf_to_dict(value) for key, value in obj.items()}
+    else:
+        return obj
 
 async def process_log(record_uuid, log_data, base_dir):
     # 建立目錄
@@ -14,11 +32,14 @@ async def process_log(record_uuid, log_data, base_dir):
     os.makedirs(mjai_dir, exist_ok=True)
     os.makedirs(tenhou_dir, exist_ok=True)
     
+    # 轉換 protobuf 對象為可序列化格式
+    serializable_data = convert_protobuf_to_dict(log_data)
+    
     # 直接保存 tenhou 格式為 json
     try:
         tenhou_path = os.path.join(tenhou_dir, f"{record_uuid}.json")
         with open(tenhou_path, "w", encoding="utf-8") as f:
-            json.dump(log_data, f, ensure_ascii=False)
+            json.dump(serializable_data, f, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving tenhou format for {record_uuid}: {str(e)}")
         return
@@ -27,7 +48,7 @@ async def process_log(record_uuid, log_data, base_dir):
     temp_file = f"temp_logs/{record_uuid}.json"
     try:
         with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(log_data, f, ensure_ascii=False)
+            json.dump(serializable_data, f, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving temp file for {record_uuid}: {str(e)}")
         return
@@ -63,9 +84,26 @@ async def process_log(record_uuid, log_data, base_dir):
 
     await asyncio.sleep(0.1)
 
+async def download_single_log(record_uuid, username, password):
+    """使用 standard-mjlog-converter 下載單個牌譜"""
+    try:
+        # 構建牌譜連結
+        link = f"https://maj-soul.com/?paipu={record_uuid}"
+        
+        # 使用 MahjongSoulAPI 下載
+        async with MahjongSoulAPI(mjs_username=username, mjs_password=password) as api:
+            actions, metadata, player, identifier = await fetch_majsoul(link)
+            return {"log": actions, "metadata": metadata, "player": player, "identifier": identifier}
+    except Exception as e:
+        print(f"下載牌譜 {record_uuid} 失敗: {str(e)}")
+        return None
+
 async def main():
-    username = "cohipi3374@nausard.com"
-    password = "48764876"
+    # 載入環境變數
+    dotenv.load_dotenv("config.env")
+    
+    username = os.getenv("ms_username", "cohipi3374@nausard.com")
+    password = os.getenv("ms_password", "48764876")
     batch_size = 1
     base_dir = "mahjong_logs"
     temp_dir = "temp_logs"
@@ -102,28 +140,25 @@ async def main():
         f.write('\n'.join(unique_ids))
     
     # 下載和處理牌譜
-    async with MajsoulPaipuDownloader() as downloader:
-        await downloader.login(username, password)
+    with open(temp_file, 'r', encoding='UTF-8') as f:
+        temp_ids = [line.strip() for line in f]
         
-        with open(temp_file, 'r', encoding='UTF-8') as f:
-            temp_ids = [line.strip() for line in f]
+    print("開始下載牌譜...")
+    downloaded_ids = []
+    with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
+        for i in range(0, total_unique_ids, batch_size):
+            batch_ids = temp_ids[i:i+batch_size]
             
-        print("開始下載牌譜...")
-        downloaded_ids = []
-        with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
-            for i in range(0, total_unique_ids, batch_size):
-                batch_ids = temp_ids[i:i+batch_size]
-                
-                # 下載牌譜
-                download_tasks = [downloader.download(record_uuid) for record_uuid in batch_ids]
-                logs_batch = await asyncio.gather(*download_tasks)
-                
-                # 處理每個下載的牌譜
-                for log, record_uuid in zip(logs_batch, batch_ids):
-                    if 'log' in log:
-                        await process_log(record_uuid, log, base_dir)
-                        downloaded_ids.append(record_uuid)
-                        download_progress.update(1)
+            # 下載牌譜
+            download_tasks = [download_single_log(record_uuid, username, password) for record_uuid in batch_ids]
+            logs_batch = await asyncio.gather(*download_tasks)
+            
+            # 處理每個下載的牌譜
+            for log, record_uuid in zip(logs_batch, batch_ids):
+                if log and 'log' in log:
+                    await process_log(record_uuid, log, base_dir)
+                    downloaded_ids.append(record_uuid)
+                    download_progress.update(1)
     
     # 清理臨時檔案
     print("\n清理臨時檔案...")
