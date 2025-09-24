@@ -1,7 +1,7 @@
 # <div align="center">**MajsoulPaipuConvert**</div>
 
 ## Integration Project
-**Convert Mahjong Soul game logs to MJAI format using mjai-reviewer and tensoul**
+**Convert Mahjong Soul game logs to MJAI format using mjai-reviewer and standard-mjlog-converter**
 
 This tool downloads game logs from MajSoul Stats and converts them to the MJAI format with a configurable crawler system for flexible data collection.
 
@@ -10,6 +10,7 @@ This tool downloads game logs from MajSoul Stats and converts them to the MJAI f
 - Only supports 4-player mahjong (三麻/3-player requires modifications to mjai-reviewer)
 - Currently only compatible with CN server
 - Uses mjai-reviewer (Apache-2.0 License)
+- Uses standard-mjlog-converter for Mahjong Soul log downloading
 
 > If you find any missing attributions or licensing issues, please submit an ISSUE. Your feedback helps us maintain proper attribution and licensing compliance.
 
@@ -21,6 +22,13 @@ This tool downloads game logs from MajSoul Stats and converts them to the MJAI f
 - ⏰ **Multi-Period**: 4w/1w/3d/1d rankings
 - 🔧 **Legacy Compatible**: Full support for manual player selection
 - 📝 **Validation**: Automatic configuration validation with helpful error messages
+- 🔄 **Migration**: Migrated from tensoul to standard-mjlog-converter for better stability
+
+## 🔄 Migration Notes
+This project has been migrated from `tensoul` to `standard-mjlog-converter` for improved:
+- **Stability**: Better error handling and connection management
+- **Compatibility**: Support for both Chinese and international servers
+- **Maintenance**: More active development and community support
 
 ## Prerequisites
 Before installation, ensure you have:
@@ -339,10 +347,17 @@ No code changes required - just edit the configuration file and run the same com
 - **Configuration errors**: The program will validate and show specific error messages for invalid configurations
 
 ## License
-This project incorporates code from mjai-reviewer under the Apache-2.0 license.
+This project incorporates code from:
+- [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) under the Apache-2.0 license
+- [standard-mjlog-converter](https://github.com/EpicOrange/standard-mjlog-converter) for Mahjong Soul log downloading
+
+**Important**: This project uses third-party libraries and tools. Please ensure compliance with their respective licenses:
+- mjai-reviewer: Apache-2.0 License (see [LICENSE](https://github.com/Equim-chan/mjai-reviewer/blob/main/LICENSE))
+- standard-mjlog-converter: Please check the original repository for license information
 
 ## Acknowledgments
 - [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) - Game log analysis tool
+- [standard-mjlog-converter](https://github.com/EpicOrange/standard-mjlog-converter) - Mahjong Soul log downloading and parsing
 - [MajSoul Stats](https://amae-koromo.sapk.ch/) - Data source
 - [Scrapy](https://scrapy.org/) - Web scraping framework
 - [Selenium](https://selenium.dev/) - Browser automation
