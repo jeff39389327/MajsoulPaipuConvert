@@ -1,7 +1,7 @@
 # <div align="center">**MajsoulPaipuConvert**</div>
 
 ## Integration Project
-**Convert Mahjong Soul game logs to MJAI format using mjai-reviewer and standard-mjlog-converter**
+**Convert Mahjong Soul game logs to MJAI format using mjai-reviewer and tensoul-py-ng**
 
 This tool downloads game logs from MajSoul Stats and converts them to the MJAI format with a configurable crawler system for flexible data collection.
 
@@ -10,7 +10,7 @@ This tool downloads game logs from MajSoul Stats and converts them to the MJAI f
 - Only supports 4-player mahjong (三麻/3-player requires modifications to mjai-reviewer)
 - Currently only compatible with CN server
 - Uses mjai-reviewer (Apache-2.0 License)
-- Uses standard-mjlog-converter for Mahjong Soul log downloading
+- Uses tensoul-py-ng for Mahjong Soul log downloading in tenhou.net/6 format
 
 > If you find any missing attributions or licensing issues, please submit an ISSUE. Your feedback helps us maintain proper attribution and licensing compliance.
 
@@ -22,13 +22,14 @@ This tool downloads game logs from MajSoul Stats and converts them to the MJAI f
 - ⏰ **Multi-Period**: 4w/1w/3d/1d rankings
 - 🔧 **Legacy Compatible**: Full support for manual player selection
 - 📝 **Validation**: Automatic configuration validation with helpful error messages
-- 🔄 **Migration**: Migrated from tensoul to standard-mjlog-converter for better stability
+- 🔄 **Migration**: Migrated to tensoul-py-ng for direct tenhou.net/6 format output
 
 ## 🔄 Migration Notes
-This project has been migrated from `tensoul` to `standard-mjlog-converter` for improved:
+This project now uses `tensoul-py-ng` for improved:
+- **Direct Format**: Downloads directly in tenhou.net/6 format, eliminating conversion steps
 - **Stability**: Better error handling and connection management
-- **Compatibility**: Support for both Chinese and international servers
-- **Maintenance**: More active development and community support
+- **Compatibility**: Native support for Mahjong Soul CN server
+- **Simplified Pipeline**: Reduced dependencies and processing steps
 
 ## Prerequisites
 Before installation, ensure you have:
@@ -197,11 +198,13 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 </details>
 
 #### **2.2 Set Mahjong Soul Credentials**
-**File Path:** `toumajsoul.py`
-```python
-username = "example@example.com"
-password = "12345678"
+**File Path:** `config.env`
+```env
+ms_username=your_email@example.com
+ms_password=your_password
 ```
+
+Note: You need a CN server account with username/password login support.
 
 ### **Step 3: Collect Game IDs**
 
@@ -349,19 +352,19 @@ No code changes required - just edit the configuration file and run the same com
 ## License
 This project incorporates code from:
 - [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) under the Apache-2.0 license
-- [standard-mjlog-converter](https://github.com/EpicOrange/standard-mjlog-converter) for Mahjong Soul log downloading
+- [tensoul-py-ng](https://github.com/unStatiK/tensoul-py-ng) for Mahjong Soul log downloading
 
 **Important**: This project uses third-party libraries and tools. Please ensure compliance with their respective licenses:
 - mjai-reviewer: Apache-2.0 License (see [LICENSE](https://github.com/Equim-chan/mjai-reviewer/blob/main/LICENSE))
-- standard-mjlog-converter: Please check the original repository for license information
+- tensoul-py-ng: MIT License (see [LICENSE](https://github.com/unStatiK/tensoul-py-ng/blob/master/LICENSE))
 
 ## Acknowledgments
 - [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) - Game log analysis tool
-- [standard-mjlog-converter](https://github.com/EpicOrange/standard-mjlog-converter) - Mahjong Soul log downloading and parsing
+- [tensoul-py-ng](https://github.com/unStatiK/tensoul-py-ng) - Mahjong Soul log downloading in tenhou.net/6 format
 - [MajSoul Stats](https://amae-koromo.sapk.ch/) - Data source
 - [Scrapy](https://scrapy.org/) - Web scraping framework
 - [Selenium](https://selenium.dev/) - Browser automation
-- [Mortal](https://github.com/Equim-chan/Mortal)  - AI Engine
+- [Mortal](https://github.com/Equim-chan/Mortal) - AI Engine
 
 ## Contributing
 Issues and pull requests are welcome. Please ensure proper attribution and licensing compliance when contributing.
