@@ -8,22 +8,9 @@ import subprocess
 from tqdm import tqdm
 import dotenv
 
-# 添加 standard-mjlog-converter 路徑
-sys.path.append('standard-mjlog-converter-main/standard-mjlog-converter-main')
-from py_mjlog_converter.fetch.majsoul import MahjongSoulAPI, fetch_majsoul
-
-def convert_protobuf_to_dict(obj):
-    """將 protobuf 對象轉換為可序列化的字典"""
-    if hasattr(obj, 'DESCRIPTOR'):
-        # 使用 MessageToDict 轉換 protobuf 對象
-        from google.protobuf.json_format import MessageToDict
-        return MessageToDict(obj, preserving_proto_field_name=True)
-    elif isinstance(obj, (list, tuple)):
-        return [convert_protobuf_to_dict(item) for item in obj]
-    elif isinstance(obj, dict):
-        return {key: convert_protobuf_to_dict(value) for key, value in obj.items()}
-    else:
-        return obj
+# 添加 tensoul-py-ng 路徑
+sys.path.append('tensoul-py-ng')
+from tensoul import MajsoulPaipuDownloader
 
 async def process_log(record_uuid, log_data, base_dir):
     # 建立目錄
@@ -32,14 +19,11 @@ async def process_log(record_uuid, log_data, base_dir):
     os.makedirs(mjai_dir, exist_ok=True)
     os.makedirs(tenhou_dir, exist_ok=True)
     
-    # 轉換 protobuf 對象為可序列化格式
-    serializable_data = convert_protobuf_to_dict(log_data)
-    
-    # 直接保存 tenhou 格式為 json
+    # log_data 已經是 tenhou.net/6 格式的字典，直接保存
     try:
         tenhou_path = os.path.join(tenhou_dir, f"{record_uuid}.json")
         with open(tenhou_path, "w", encoding="utf-8") as f:
-            json.dump(serializable_data, f, ensure_ascii=False)
+            json.dump(log_data, f, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving tenhou format for {record_uuid}: {str(e)}")
         return
@@ -48,7 +32,7 @@ async def process_log(record_uuid, log_data, base_dir):
     temp_file = f"temp_logs/{record_uuid}.json"
     try:
         with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(serializable_data, f, ensure_ascii=False)
+            json.dump(log_data, f, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving temp file for {record_uuid}: {str(e)}")
         return
@@ -84,16 +68,19 @@ async def process_log(record_uuid, log_data, base_dir):
 
     await asyncio.sleep(0.1)
 
-async def download_single_log(record_uuid, username, password):
-    """使用 standard-mjlog-converter 下載單個牌譜"""
+async def download_single_log(record_uuid, downloader):
+    """使用 tensoul-py-ng 下載單個牌譜"""
     try:
-        # 構建牌譜連結
-        link = f"https://maj-soul.com/?paipu={record_uuid}"
+        # tensoul 直接使用 record_uuid 下載並返回 tenhou.net/6 格式
+        # lobby_id 設為 0（默認值）
+        result = await downloader.download(record_uuid, lobby_id=0)
         
-        # 使用 MahjongSoulAPI 下載
-        async with MahjongSoulAPI(mjs_username=username, mjs_password=password) as api:
-            actions, metadata, player, identifier = await fetch_majsoul(link)
-            return {"log": actions, "metadata": metadata, "player": player, "identifier": identifier}
+        if result.get("is_error", False):
+            print(f"下載牌譜 {record_uuid} 失敗: {result.get('error_msg', 'Unknown error')}")
+            return None
+        
+        # 返回 log 字段，它包含 tenhou.net/6 格式的數據
+        return result.get("log")
     except Exception as e:
         print(f"下載牌譜 {record_uuid} 失敗: {str(e)}")
         return None
@@ -145,20 +132,27 @@ async def main():
         
     print("開始下載牌譜...")
     downloaded_ids = []
-    with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
-        for i in range(0, total_unique_ids, batch_size):
-            batch_ids = temp_ids[i:i+batch_size]
-            
-            # 下載牌譜
-            download_tasks = [download_single_log(record_uuid, username, password) for record_uuid in batch_ids]
-            logs_batch = await asyncio.gather(*download_tasks)
-            
-            # 處理每個下載的牌譜
-            for log, record_uuid in zip(logs_batch, batch_ids):
-                if log and 'log' in log:
-                    await process_log(record_uuid, log, base_dir)
-                    downloaded_ids.append(record_uuid)
-                    download_progress.update(1)
+    
+    # 初始化 tensoul downloader 並登入
+    async with MajsoulPaipuDownloader() as downloader:
+        print("登入雀魂...")
+        await downloader.login(username, password)
+        print("登入成功！")
+        
+        with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
+            for i in range(0, total_unique_ids, batch_size):
+                batch_ids = temp_ids[i:i+batch_size]
+                
+                # 下載牌譜
+                download_tasks = [download_single_log(record_uuid, downloader) for record_uuid in batch_ids]
+                logs_batch = await asyncio.gather(*download_tasks)
+                
+                # 處理每個下載的牌譜
+                for log, record_uuid in zip(logs_batch, batch_ids):
+                    if log:
+                        await process_log(record_uuid, log, base_dir)
+                        downloaded_ids.append(record_uuid)
+                        download_progress.update(1)
     
     # 清理臨時檔案
     print("\n清理臨時檔案...")
