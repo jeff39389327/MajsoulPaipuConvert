@@ -23,6 +23,7 @@ This tool downloads game logs from MajSoul Stats and converts them to the MJAI f
 - 🔧 **Legacy Compatible**: Full support for manual player selection
 - 📝 **Validation**: Automatic configuration validation with helpful error messages
 - 🔄 **Migration**: Migrated to tensoul-py-ng for direct tenhou.net/6 format output
+- ⏱️ **Think Time Collection**: Automatically collect and inject player thinking time (milliseconds) into MJAI format
 
 ## 🔄 Migration Notes
 This project now uses `tensoul-py-ng` for improved:
@@ -200,9 +201,22 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 #### **2.2 Set Mahjong Soul Credentials**
 **File Path:** `config.env`
 ```env
+# 雀魂認證設定
 ms_username=your_email@example.com
 ms_password=your_password
+
+# 思考時間收集設定（可選）
+# 設為 true 啟用，false 停用（默認：true）
+# 啟用後會在 mjai 格式中添加 think_ms 字段，記錄玩家每個動作的思考時間（毫秒）
+COLLECT_TIMING=true
 ```
+
+**Configuration Parameters:**
+- `ms_username`: Your Mahjong Soul account email
+- `ms_password`: Your Mahjong Soul account password
+- `COLLECT_TIMING`: Enable/disable thinking time collection (default: `true`)
+  - `true`: Inject `think_ms` field into MJAI format with millisecond-precision thinking time
+  - `false`: Standard MJAI format without thinking time data
 
 Note: You need a CN server account with username/password login support.
 
@@ -252,8 +266,48 @@ Example output in `tonpuulist.txt`:
 1. Move `tonpuulist.txt` to the root directory
 2. Run **`toumajsoul.py`**
 
-Game logs will be saved in the `tonpuulog` directory.
-Example output: `241103-057ea444-a219-4202-930e-2d2472f4d6e600.json.gz`
+Game logs will be saved in the `mahjong_logs` directory with the following structure:
+```
+mahjong_logs/
+├── mjai/           # MJAI format (with think_ms if enabled)
+│   └── *.json.gz
+└── tenhou/         # Tenhou.net/6 format
+    └── *.json
+```
+
+#### **⏱️ Thinking Time Feature**
+
+When `COLLECT_TIMING=true` (default), the MJAI format will include `think_ms` field:
+
+**Standard MJAI output:**
+```json
+{"type": "dahai", "actor": 0, "pai": "W", "tsumogiri": false}
+```
+
+**With thinking time enabled:**
+```json
+{"type": "dahai", "actor": 0, "pai": "W", "think_ms": 2864, "tsumogiri": false}
+```
+
+**Thinking Time Data:**
+- `think_ms`: Milliseconds from receiving tile to making action
+- Calculated from Mahjong Soul's `passed` timestamp (real game time)
+- Includes all player actions: discard, chi, pon, kan, riichi
+- Typical values:
+  - Quick discard (tsumogiri): 1000-3000 ms
+  - Thoughtful discard: 2000-15000 ms  
+  - Calling tiles (chi/pon): 500-5000 ms
+
+**Analysis Example:**
+```python
+import json, gzip
+
+with gzip.open('mahjong_logs/mjai/xxx.json.gz', 'rt') as f:
+    for line in f:
+        event = json.loads(line)
+        if 'think_ms' in event:
+            print(f"Player {event['actor']}: {event['think_ms']}ms")
+```
 
 ### **Step 5: Validate Logs**
 ```bash
@@ -265,7 +319,8 @@ validate_logs.exe tonpuulog
 MajsoulPaipuConvert/
 ├── README.md
 ├── requirements.txt
-├── toumajsoul.py                    # Game log downloader
+├── config.env                       # Authentication & feature settings
+├── toumajsoul.py                    # Game log downloader with timing support
 ├── crawler_config.json              # Crawler configuration
 ├── tonpuulist.txt                   # Generated game IDs
 ├── paipu_project/                   # Scrapy crawler project
@@ -274,8 +329,13 @@ MajsoulPaipuConvert/
 │       ├── crawler_config.json      # Alternative config location
 │       └── spiders/
 │           └── PaipuSpider.py       # Main crawler
-└── tonpuulog/                       # Downloaded game logs
-    └── *.json.gz                    # Compressed game files
+├── mahjong_logs/                    # Downloaded game logs (new structure)
+│   ├── mjai/                        # MJAI format with think_ms
+│   │   └── *.json.gz
+│   └── tenhou/                      # Tenhou.net/6 format
+│       └── *.json
+└── tensoul-py-ng/                   # Mahjong Soul log downloader
+    └── tensoul/
 ```
 
 ## 🔍 Verification and Debugging
@@ -298,19 +358,29 @@ If you encounter issues:
 pip install -r requirements.txt
 pip install scrapy selenium
 
-# 2. Configure crawler (edit crawler_config.json)
-#    Choose either "auto" or "manual" mode
+# 2. Configure settings
+#    - Edit crawler_config.json (choose "auto" or "manual" mode)
+#    - Edit config.env (set credentials and COLLECT_TIMING option)
 
 # 3. Collect game IDs (unified command for both modes)
 cd paipu_project
 scrapy crawl paipu_spider
 
-# 4. Download game logs
+# 4. Download game logs (with thinking time collection)
 cd ..
 python toumajsoul.py
 
 # 5. Validate logs
-validate_logs.exe tonpuulog
+validate_logs.exe mahjong_logs/mjai
+```
+
+**Thinking Time Collection Control:**
+```bash
+# Enable thinking time collection (default)
+COLLECT_TIMING=true
+
+# Disable thinking time collection
+COLLECT_TIMING=false
 ```
 
 ## 🔄 Switching Between Modes
@@ -348,6 +418,15 @@ No code changes required - just edit the configuration file and run the same com
 - **Process hanging**: For auto mode, verify network access to rankings site; for manual mode, check player URLs format
 - **Rate limiting**: Adjust `max_players_per_period` if experiencing timeouts
 - **Configuration errors**: The program will validate and show specific error messages for invalid configurations
+
+**Thinking Time Issues:**
+- **No think_ms in output**: Verify `COLLECT_TIMING=true` in `config.env`
+- **think_ms values seem wrong**: 
+  - Values are calculated from Mahjong Soul's server timestamps (`passed` field)
+  - Include small network latency (usually < 100ms)
+  - Opening moves may show time from deal completion to first action
+- **Missing think_ms for some actions**: Only player actions (dahai, chi, pon, kan, riichi) include thinking time
+- **Abnormally long think_ms**: May indicate AFK or disconnection (values > 120000ms = 2 minutes)
 
 ## License
 This project incorporates code from:
