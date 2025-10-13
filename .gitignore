@@ -2,7 +2,10 @@ log/
 new_log/
 tonpuulist.txt
 tonpuulog/
+mahjong_logs/
 majsoul.py
+a.py
+temp_logs/
 # Python
 __pycache__/
 *.py[cod]
