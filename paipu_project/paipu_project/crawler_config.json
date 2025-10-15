@@ -1,9 +1,8 @@
 {
   "crawler_mode": "date_room",
-  "start_date": "2019-08-23",
-  "end_date": "2019-08-24",
-  "target_room": "Throne",
-  "output_filename": "lists.txt",
-  "headless_mode": true,
-  "save_screenshots": false
+  "start_date": "2025-05-10",
+  "end_date": "2025-05-10", 
+  "target_room": "Gold",
+  "output_filename": "date_room_list.txt",
+  "headless_mode": false
 }
