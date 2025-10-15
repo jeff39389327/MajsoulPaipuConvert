@@ -16,56 +16,59 @@ import subprocess
 import sys
 import os
 import tempfile
+import shutil
+import signal
+import atexit
 
 @dataclass
 class CrawlerConfig:
-    """爬蟲配置類"""
-    # 爬蟲模式選擇: "auto", "manual", 或 "date_room"
+    """Crawler configuration class"""
+    # Crawler mode selection: "auto", "manual", or "date_room"
     crawler_mode: str = "auto"
     
-    # 手動模式：玩家URLs列表 (當 crawler_mode = "manual" 時使用)
+    # Manual mode: List of player URLs (used when crawler_mode = "manual")
     manual_player_urls: List[str] = None
     
-    # 自動模式：時間段設定 (可選: "4w", "1w", "3d", "1d")
+    # Auto mode: Time period settings (options: "4w", "1w", "3d", "1d")
     time_periods: List[str] = None
     
-    # 自動模式：段位設定 (可選: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All")
+    # Auto mode: Rank settings (options: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All")
     ranks: List[str] = None
     
-    # 每個時間段最多抓取的玩家數量
+    # Maximum number of players to fetch per time period
     max_players_per_period: int = 20
     
-    # 牌譜數量限制參數
+    # Paipu quantity limit parameter
     paipu_limit: int = 9999
     
-    # date_room模式：日期區間和目標房間
-    start_date: str = None  # 格式: "2019-08-20"
-    end_date: str = None    # 格式: "2019-08-23"
-    target_room: str = None # 可選: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"
+    # date_room mode: Date range and target room
+    start_date: str = None  # Format: "2019-08-20"
+    end_date: str = None    # Format: "2019-08-23"
+    target_room: str = None # Options: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"
     
-    # 輸出檔案名稱
+    # Output filename
     output_filename: str = "tonpuulist.txt"
     
-    # 是否啟用無頭模式 (headless)
+    # Enable headless mode
     headless_mode: bool = True
     
-    # 是否儲存驗證截圖
+    # Save verification screenshots
     save_screenshots: bool = True
 
     @classmethod
     def from_json(cls, json_path: str):
-        """從JSON檔案載入配置"""
+        """Load configuration from JSON file"""
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return cls(**data)
         except FileNotFoundError:
-            print(f"配置檔案 {json_path} 不存在，使用預設配置")
+            print(f"Config file {json_path} not found, using default configuration")
             return cls.get_default_config()
     
     @classmethod
     def get_default_config(cls):
-        """取得預設配置"""
+        """Get default configuration"""
         return cls(
             crawler_mode="auto",
             manual_player_urls=[],
@@ -82,8 +85,8 @@ class CrawlerConfig:
         )
     
     def save_to_json(self, json_path: str):
-        """儲存配置到JSON檔案"""
-        # 處理 None 值，轉換為空列表以便於JSON序列化
+        """Save configuration to JSON file"""
+        # Handle None values, convert to empty lists for JSON serialization
         config_dict = self.__dict__.copy()
         if config_dict.get('manual_player_urls') is None:
             config_dict['manual_player_urls'] = []
@@ -96,68 +99,124 @@ class CrawlerConfig:
             json.dump(config_dict, f, ensure_ascii=False, indent=2)
     
     def validate(self):
-        """驗證配置的有效性"""
+        """Validate configuration validity"""
         valid_modes = ["auto", "manual", "date_room"]
         valid_periods = ["4w", "1w", "3d", "1d"]
         valid_ranks = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All"]
         valid_rooms = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"]
         
-        # 驗證爬蟲模式
+        # Validate crawler mode
         if self.crawler_mode not in valid_modes:
-            raise ValueError(f"無效的爬蟲模式: {self.crawler_mode}。有效選項: {valid_modes}")
+            raise ValueError(f"Invalid crawler mode: {self.crawler_mode}. Valid options: {valid_modes}")
         
-        # 根據模式驗證對應參數
+        # Validate corresponding parameters based on mode
         if self.crawler_mode == "manual":
             if not self.manual_player_urls or len(self.manual_player_urls) == 0:
-                raise ValueError("手動模式需要提供 manual_player_urls")
-            print(f"✅ 手動模式配置驗證通過 - 已設定 {len(self.manual_player_urls)} 個玩家URLs")
+                raise ValueError("Manual mode requires manual_player_urls")
+            print(f"Manual mode configuration validated - {len(self.manual_player_urls)} player URLs configured")
             
         elif self.crawler_mode == "auto":
             if not self.time_periods or len(self.time_periods) == 0:
-                raise ValueError("自動模式需要提供 time_periods")
+                raise ValueError("Auto mode requires time_periods")
             if not self.ranks or len(self.ranks) == 0:
-                raise ValueError("自動模式需要提供 ranks")
+                raise ValueError("Auto mode requires ranks")
                 
-            # 驗證時間段
+            # Validate time periods
             for period in self.time_periods:
                 if period not in valid_periods:
-                    raise ValueError(f"無效的時間段: {period}。有效選項: {valid_periods}")
+                    raise ValueError(f"Invalid time period: {period}. Valid options: {valid_periods}")
             
-            # 驗證段位
+            # Validate ranks
             for rank in self.ranks:
                 if rank not in valid_ranks:
-                    raise ValueError(f"無效的段位: {rank}。有效選項: {valid_ranks}")
+                    raise ValueError(f"Invalid rank: {rank}. Valid options: {valid_ranks}")
             
-            print(f"✅ 自動模式配置驗證通過")
+            print(f"Auto mode configuration validated")
             
         elif self.crawler_mode == "date_room":
-            # 驗證日期格式和必要參數
+            # Validate date format and required parameters
             if not self.start_date or not self.end_date:
-                raise ValueError("date_room模式需要提供 start_date 和 end_date")
+                raise ValueError("date_room mode requires start_date and end_date")
             if not self.target_room:
-                raise ValueError("date_room模式需要提供 target_room")
+                raise ValueError("date_room mode requires target_room")
                 
-            # 驗證日期格式
+            # Validate date format
             try:
                 start = datetime.strptime(self.start_date, "%Y-%m-%d")
                 end = datetime.strptime(self.end_date, "%Y-%m-%d")
                 if start > end:
-                    raise ValueError("start_date 不能晚於 end_date")
+                    raise ValueError("start_date cannot be later than end_date")
             except ValueError as e:
-                raise ValueError(f"日期格式錯誤（應為YYYY-MM-DD）: {e}")
+                raise ValueError(f"Date format error (should be YYYY-MM-DD): {e}")
             
-            # 驗證房間
+            # Validate room
             if self.target_room not in valid_rooms:
-                raise ValueError(f"無效的房間: {self.target_room}。有效選項: {valid_rooms}")
+                raise ValueError(f"Invalid room: {self.target_room}. Valid options: {valid_rooms}")
             
-            print(f"✅ date_room模式配置驗證通過")
-            print(f"  日期範圍: {self.start_date} 到 {self.end_date}")
-            print(f"  目標房間: {self.target_room}")
+            print(f"date_room mode configuration validated")
+            print(f"  Date range: {self.start_date} to {self.end_date}")
+            print(f"  Target room: {self.target_room}")
         
-        print("✅ 總體配置驗證通過")
+        print("Overall configuration validated")
+
+def apply_stealth_js(driver):
+    """Apply anti-detection JavaScript to WebDriver"""
+    try:
+        # Enhanced anti-detection: Modify more browser features
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
+        
+        # Hide webdriver features
+        driver.execute_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            
+            // Modify plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            
+            // Modify languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['zh-TW', 'zh', 'en-US', 'en']
+            });
+            
+            // Modify platform
+            Object.defineProperty(navigator, 'platform', {
+                get: () => 'Win32'
+            });
+            
+            // Modify hardwareConcurrency
+            Object.defineProperty(navigator, 'hardwareConcurrency', {
+                get: () => 8
+            });
+            
+            // Modify deviceMemory
+            Object.defineProperty(navigator, 'deviceMemory', {
+                get: () => 8
+            });
+            
+            // Modify Chrome object
+            window.chrome = {
+                runtime: {}
+            };
+            
+            // Modify permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+        """)
+        print("Anti-detection measures applied")
+    except Exception as e:
+        print(f"Error applying anti-detection measures: {e}")
 
 def get_rank_display_name(rank: str) -> Dict[str, str]:
-    """取得段位的顯示名稱對應"""
+    """Get rank display name mapping"""
     rank_mapping = {
         "Throne": "王座",
         "Jade": "玉",
@@ -170,7 +229,7 @@ def get_rank_display_name(rank: str) -> Dict[str, str]:
     return rank_mapping.get(rank, rank)
 
 def get_period_display_name(period: str) -> str:
-    """取得時間段的顯示名稱"""
+    """Get time period display name"""
     period_mapping = {
         "4w": "四週",
         "1w": "一週", 
@@ -181,24 +240,24 @@ def get_period_display_name(period: str) -> str:
 
 def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True) -> List[str]:
     """
-    執行date_room_extractor.py並獲取其輸出的牌譜ID列表
+    Execute date_room_extractor.py and get the output paipu ID list
     
     Args:
-        target_date: 目標日期 (格式: "2019-08-23")
-        target_room: 目標房間 (如: "Throne", "Jade", "Gold" 等)
-        headless_mode: 是否使用無頭模式
+        target_date: Target date (format: "2019-08-23")
+        target_room: Target room (e.g.: "Throne", "Jade", "Gold", etc.)
+        headless_mode: Whether to use headless mode
         
     Returns:
-        牌譜ID列表
+        List of paipu IDs
     """
-    # 創建臨時的date_room_extractor.py修改版本
+    # Create temporary modified version of date_room_extractor.py
     temp_script = """
 import sys
 sys.path.insert(0, '.')
 from date_room_extractor import OptimizedPaipuExtractor, convert_ranks_to_english
 
 def main():
-    # 參數設定
+    # Parameter settings
     target_date = "{target_date}"
     target_ranks = ["{target_room}"]
     max_paipus = 99999
@@ -215,7 +274,7 @@ def main():
             max_paipus=max_paipus
         )
         
-        # 只輸出牌譜ID，每行一個
+        # Output only paipu IDs, one per line
         for paipu in results:
             print(paipu)
         
@@ -230,248 +289,323 @@ if __name__ == "__main__":
         headless_mode=str(headless_mode)
     )
     
-    # 創建臨時檔案
+    # Create temporary file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
         temp_file.write(temp_script)
         temp_file_path = temp_file.name
     
     try:
-        # 執行臨時腳本
+        # Execute temporary script
+        # Use errors='ignore' to ignore encoding errors (Chrome logs may contain non-UTF-8 characters)
         result = subprocess.run(
             [sys.executable, temp_file_path],
             capture_output=True,
             text=True,
-            encoding='utf-8'
+            encoding='utf-8',
+            errors='ignore'  # Ignore characters that cannot be decoded
         )
         
         if result.returncode != 0:
-            print(f"執行date_room_extractor.py時出錯: {result.stderr}")
+            # Safely handle error output
+            stderr_output = result.stderr if result.stderr else "Unknown error"
+            print(f"Error executing date_room_extractor.py: {stderr_output}")
             return []
         
-        # 解析輸出，每行一個牌譜ID
+        # Parse output, one paipu ID per line
         paipu_ids = []
-        for line in result.stdout.strip().split('\n'):
-            line = line.strip()
-            # 過濾掉非牌譜ID的輸出（如print的調試信息）
-            if line and re.match(r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', line):
-                paipu_ids.append(line)
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                line = line.strip()
+                # Filter out non-paipu ID output (such as print debug messages)
+                if line and re.match(r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', line):
+                    paipu_ids.append(line)
         
         return paipu_ids
         
     finally:
-        # 刪除臨時檔案
+        # Delete temporary file
         try:
             os.unlink(temp_file_path)
         except:
             pass
 
 def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
-    """使用date_room模式收集牌譜"""
+    """Collect paipus using date_room mode"""
     all_paipus = []
     
+    # Setup interrupt handler
+    def signal_handler(sig, frame):
+        print(f"\n\nInterrupt signal received (Ctrl+C)")
+        print(f"Currently collected {len(all_paipus)} paipus")
+        print(f"Saving data...")
+        # Data will be saved in finally block
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
     try:
-        # 解析日期範圍
+        # Parse date range
         start_date = datetime.strptime(config.start_date, "%Y-%m-%d")
         end_date = datetime.strptime(config.end_date, "%Y-%m-%d")
         
-        # 計算總天數
+        # Calculate total days
         total_days = (end_date - start_date).days + 1
-        print(f"\n=== 開始 date_room 模式收集 ===")
-        print(f"日期範圍: {config.start_date} 到 {config.end_date} (共 {total_days} 天)")
-        print(f"目標房間: {config.target_room}")
-        print(f"無頭模式: {config.headless_mode}")
-        print("="*50)
+        print(f"\n{'='*70}")
+        print(f"Starting date_room mode collection")
+        print(f"{'='*70}")
+        print(f"Date range: {config.start_date} to {config.end_date} (total {total_days} days)")
+        print(f"Target room: {config.target_room}")
+        print(f"Headless mode: {'Enabled' if config.headless_mode else 'Disabled'}")
+        print(f"Output file: {config.output_filename}")
+        print(f"{'='*70}\n")
         
-        # 處理每一天
+        # Process each day
         current_date = start_date
         day_count = 0
+        start_time = time.time()
         
         while current_date <= end_date:
             day_count += 1
             date_str = current_date.strftime("%Y-%m-%d")
-            print(f"\n[{day_count}/{total_days}] 正在處理日期: {date_str}")
+            day_start = time.time()
             
-            # 執行date_room_extractor.py獲取當天的牌譜
-            day_results = execute_date_room_extractor_py(
-                target_date=date_str,
-                target_room=config.target_room,
-                headless_mode=config.headless_mode
-            )
+            print(f"\n{'-'*70}")
+            print(f"[{day_count}/{total_days}] Processing date: {date_str}")
+            print(f"{'-'*70}")
             
-            # 添加到總列表（date_room_extractor.py已經去重，但這裡再次確保跨日期的去重）
+            # Execute date_room_extractor.py to get paipus for this day
+            try:
+                day_results = execute_date_room_extractor_py(
+                    target_date=date_str,
+                    target_room=config.target_room,
+                    headless_mode=config.headless_mode
+                )
+            except Exception as e:
+                print(f"Error processing {date_str}: {e}")
+                import traceback
+                traceback.print_exc()
+                day_results = []
+            
+            # Add to total list (date_room_extractor.py already deduplicates, but ensure cross-date deduplication here)
+            new_paipus = 0
             for paipu in day_results:
                 if paipu not in all_paipus:
                     all_paipus.append(paipu)
+                    new_paipus += 1
             
-            print(f"  ✓ {date_str} 收集到 {len(day_results)} 個牌譜")
-            print(f"  累計收集: {len(all_paipus)} 個不重複牌譜")
+            day_elapsed = time.time() - day_start
+            total_elapsed = time.time() - start_time
             
-            # 移到下一天
+            print(f"\n{date_str} completed:")
+            print(f"  Collected today: {len(day_results)} paipus")
+            print(f"  New today: {new_paipus} (after deduplication)")
+            print(f"  Cumulative total: {len(all_paipus)} unique paipus")
+            print(f"  Time today: {day_elapsed:.1f} seconds")
+            print(f"  Total time: {total_elapsed/60:.1f} minutes")
+            
+            # Move to next day
             current_date += timedelta(days=1)
             
-            # 如果不是最後一天，稍微等待一下
+            # If not the last day, wait a bit
             if current_date <= end_date:
-                time.sleep(1)
+                remaining_days = (end_date - current_date).days + 1
+                avg_time_per_day = total_elapsed / day_count
+                estimated_remaining = avg_time_per_day * remaining_days / 60
+                print(f"  Estimated remaining time: {estimated_remaining:.1f} minutes ({remaining_days} days)")
+            
         
-        print(f"\n=== date_room 模式收集完成 ===")
-        print(f"總計收集到 {len(all_paipus)} 個不重複的牌譜ID")
+        total_time = time.time() - start_time
+        print(f"\n{'='*70}")
+        print(f"date_room mode collection completed!")
+        print(f"{'='*70}")
+        print(f"Total collected: {len(all_paipus)} unique paipu IDs")
+        print(f"Days processed: {total_days} days")
+        print(f"Total time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
+        print(f"Average speed: {len(all_paipus)/total_time*60:.1f} paipus/minute")
+        print(f"{'='*70}\n")
         
     except Exception as e:
-        print(f"date_room模式執行出錯: {e}")
+        print(f"\ndate_room mode execution error: {e}")
         import traceback
         traceback.print_exc()
+        print(f"Collected {len(all_paipus)} paipus before error")
     
     return all_paipus
 
 def setup_rank_selection(driver, target_ranks: List[str]):
-    """設定段位選擇"""
+    """Setup rank selection"""
     all_available_ranks = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"]
     
     try:
-        print("正在配置段位選擇...")
+        print("Configuring rank selection...")
         
-        # 如果選擇"全部"，直接使用網頁預設狀態（所有段位都已選中）
+        # If "All" is selected, use the page's default state (all ranks already selected)
         if "All" in target_ranks:
-            print("選擇全部段位 - 使用網頁預設狀態，無需點擊")
-            print("網頁預設已選中所有段位，跳過段位選擇操作")
+            print("Selecting all ranks - using page default state, no clicking needed")
+            print("Page default has all ranks selected, skipping rank selection operation")
             return
         
-        # 先取消選擇所有段位
+        # First deselect all ranks
         for rank in all_available_ranks:
             try:
-                # 嘗試英文標籤
+                # Try English label
                 rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{rank}']")
                 checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
                 
                 if checkbox.is_selected():
-                    print(f"取消選擇段位: {rank}")
+                    print(f"Deselecting rank: {rank}")
                     driver.execute_script("arguments[0].click();", rank_label)
-                    time.sleep(0.5)
             except:
-                # 嘗試中文標籤
+                # Try Chinese label
                 try:
                     chinese_rank = get_rank_display_name(rank)
                     rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{chinese_rank}']")
                     checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
                     
                     if checkbox.is_selected():
-                        print(f"取消選擇段位: {chinese_rank}")
+                        print(f"Deselecting rank: {chinese_rank}")
                         driver.execute_script("arguments[0].click();", rank_label)
-                        time.sleep(0.5)
                 except:
                     continue
         
-        # 選擇目標段位
+        # Select target ranks
         for rank in target_ranks:
             try:
-                # 嘗試英文標籤
+                # Try English label
                 rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{rank}']")
                 checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
                 
                 if not checkbox.is_selected():
-                    print(f"選擇段位: {rank}")
+                    print(f"Selecting rank: {rank}")
                     driver.execute_script("arguments[0].click();", rank_label)
-                    time.sleep(0.5)
                 else:
-                    print(f"段位 {rank} 已選中")
+                    print(f"Rank {rank} already selected")
             except:
-                # 嘗試中文標籤
+                # Try Chinese label
                 try:
                     chinese_rank = get_rank_display_name(rank)
                     rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{chinese_rank}']")
                     checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
                     
                     if not checkbox.is_selected():
-                        print(f"選擇段位: {chinese_rank}")
+                        print(f"Selecting rank: {chinese_rank}")
                         driver.execute_script("arguments[0].click();", rank_label)
-                        time.sleep(0.5)
                     else:
-                        print(f"段位 {chinese_rank} 已選中")
+                        print(f"Rank {chinese_rank} already selected")
                 except Exception as e:
-                    print(f"無法選擇段位 {rank}: {e}")
+                    print(f"Unable to select rank {rank}: {e}")
         
-        # 等待頁面更新
-        time.sleep(3)
-        print("段位選擇配置完成")
+        # Wait for page update
+        print("Rank selection configuration completed")
         
     except Exception as e:
-        print(f"配置段位選擇時出錯: {e}")
+        print(f"Error configuring rank selection: {e}")
 
 def get_top_players_urls(config: CrawlerConfig):
-    """根據配置自動抓取排行榜玩家的URLs"""
+    """Automatically crawl leaderboard player URLs based on configuration"""
     chrome_options = Options()
-    if config.headless_mode:
-        chrome_options.add_argument("--headless")
     
-    chrome_options.add_argument("--window-size=1920,1080")
+    if config.headless_mode:
+        chrome_options.add_argument("--headless=new")
+    
+    # Core fix: Do not use user-data-dir, use random port isolation
+    import random
+    remote_port = random.randint(9222, 65535)
+    chrome_options.add_argument(f"--remote-debugging-port={remote_port}")
+    
+    # Core stability parameters
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-software-rasterizer")
+    
+    # Disable various features that may cause conflicts
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--no-first-run")
+    chrome_options.add_argument("--no-default-browser-check")
+    chrome_options.add_argument("--disable-popup-blocking")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--window-size=1920,1080")
+    
+    # Prevent detection as automation tool
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # Log settings - strongly suppress all logs
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_argument("--silent")
+    chrome_options.add_argument("--disable-logging")
+    
+    # Set environment variables to suppress Chrome logs
+    os.environ['WDM_LOG_LEVEL'] = '0'
+    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+    
     driver = webdriver.Chrome(options=chrome_options)
+    apply_stealth_js(driver)  # Apply anti-detection
+    print(f"Chrome instance started (debug port: {remote_port})")
     
     all_player_urls = []
     
     try:
-        # 存取排名頁面
+        # Access ranking page
         driver.get("https://amae-koromo.sapk.ch/ranking/delta")
         
-        # 等待頁面載入完成
+        # Wait for page load complete
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
         
-        time.sleep(5)
-        
-        # 建立段位顯示字串
+        # Build rank display string
         rank_display = ", ".join([get_rank_display_name(rank) for rank in config.ranks])
         period_display = ", ".join([get_period_display_name(period) for period in config.time_periods])
         
-        print(f"正在抓取汪汪榜排名")
-        print(f"目標時間段: {period_display}")
-        print(f"目標段位: {rank_display}")
+        print(f"Fetching leaderboard rankings")
+        print(f"Target time periods: {period_display}")
+        print(f"Target ranks: {rank_display}")
         
-        # 設定段位選擇
+        # Setup rank selection
         setup_rank_selection(driver, config.ranks)
         
-        # 儲存段位選擇驗證截圖
+        # Save rank selection verification screenshot
         if config.save_screenshots:
             driver.save_screenshot("screenshot_rank_selection_verification.png")
-            print("已儲存段位選擇驗證截圖: screenshot_rank_selection_verification.png")
+            print("Saved rank selection verification screenshot: screenshot_rank_selection_verification.png")
         
-        # 處理每個時間段
+        # Process each time period
         for period in config.time_periods:
-            print(f"\n=== 開始處理時間段: {get_period_display_name(period)} ({period}) ===")
+            print(f"\n=== Starting to process time period: {get_period_display_name(period)} ({period}) ===")
             
             try:
-                # 查找並點擊對應的時間段radio按鈕
-                print(f"查找時間段 {period} 的radio按鈕...")
+                # Find and click corresponding time period radio button
+                print(f"Finding radio button for time period {period}...")
                 
                 radio_button = driver.find_element(By.CSS_SELECTOR, f'input[type="radio"][value="{period}"]')
-                print(f"找到 {period} 的radio按鈕")
+                print(f"Found radio button for {period}")
                 
-                # 點擊radio按鈕
+                # Click radio button
                 driver.execute_script("arguments[0].click();", radio_button)
-                print(f"已點擊 {period} 時間段")
+                print(f"Clicked {period} time period")
                 
-                # 等待頁面更新
-                time.sleep(5)
-                
-                # 儲存驗證截圖
+                # Save verification screenshot
                 if config.save_screenshots:
                     rank_suffix = "_".join(config.ranks).lower()
                     screenshot_filename = f"screenshot_{period}_positive_ranking_{rank_suffix}.png"
                     driver.save_screenshot(screenshot_filename)
-                    print(f"已儲存截圖: {screenshot_filename}")
+                    print(f"Saved screenshot: {screenshot_filename}")
                 
             except Exception as e:
-                print(f"切換到時間段 {period} 時出錯: {e}")
+                print(f"Error switching to time period {period}: {e}")
                 continue
             
-            # 取得該時間段的玩家連結
+            # Get player links for this time period
             period_player_urls = extract_positive_ranking_players(driver, period, config)
             all_player_urls.extend(period_player_urls)
             
-            print(f"時間段 {period} 取得到 {len(period_player_urls)} 個玩家URL")
+            print(f"Time period {period} obtained {len(period_player_urls)} player URLs")
         
-        # 去重處理
+        # Deduplication processing
         unique_player_urls = []
         seen_players = set()
         
@@ -483,11 +617,11 @@ def get_top_players_urls(config: CrawlerConfig):
                     seen_players.add(player_id)
                     unique_player_urls.append(url)
         
-        print(f"共取得到 {len(unique_player_urls)} 個不重複的玩家URLs（/12模式）")
+        print(f"Obtained {len(unique_player_urls)} unique player URLs (/12 mode)")
         
         if config.save_screenshots:
-            print(f"\n📸 驗證截圖已儲存:")
-            print(f"  - screenshot_rank_selection_verification.png (段位選擇驗證)")
+            print(f"\nVerification screenshots saved:")
+            print(f"  - screenshot_rank_selection_verification.png (rank selection verification)")
             for period in config.time_periods:
                 rank_suffix = "_".join(config.ranks).lower()
                 print(f"  - screenshot_{period}_positive_ranking_{rank_suffix}.png ({get_period_display_name(period)})")
@@ -495,39 +629,40 @@ def get_top_players_urls(config: CrawlerConfig):
         return unique_player_urls
         
     except Exception as e:
-        print(f"抓取排名時出錯: {e}")
+        print(f"Error fetching rankings: {e}")
         return []
     
     finally:
         driver.quit()
+        print("Chrome instance closed")
 
 def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
-    """從Positive ranking列中提取玩家連結"""
+    """Extract player links from Positive ranking column"""
     player_urls = []
     
     try:
-        print(f"開始查找時間段 {period} 的Positive ranking列中的玩家連結...")
+        print(f"Starting to find player links in Positive ranking column for time period {period}...")
         
-        # 方法1：嘗試查找Positive ranking列中的玩家連結
+        # Method 1: Try to find player links in Positive ranking column
         player_links_in_positive = []
         
         try:
             positive_heading = driver.find_element(By.XPATH, "//*[contains(text(), 'Positive ranking')]")
-            print("找到Positive ranking標題")
+            print("Found Positive ranking heading")
             
             positive_container = positive_heading.find_element(By.XPATH, "./following-sibling::*[1] | ./parent::*/following-sibling::*[1]")
             
             container_links = positive_container.find_elements(By.CSS_SELECTOR, "a[href*='/player/']")
             player_links_in_positive.extend(container_links)
-            print(f"在Positive ranking容器中找到 {len(container_links)} 個玩家連結")
+            print(f"Found {len(container_links)} player links in Positive ranking container")
             
         except Exception as e:
-            print(f"方法1失敗: {e}")
+            print(f"Method 1 failed: {e}")
         
-        # 方法2：如果方法1失敗，嘗試通過頁面佈局定位
+        # Method 2: If method 1 fails, try to locate through page layout
         if not player_links_in_positive:
             try:
-                print("嘗試方法2：通過頁面佈局定位Positive ranking...")
+                print("Trying method 2: Locating Positive ranking through page layout...")
                 
                 all_player_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/player/']")
                 
@@ -541,28 +676,28 @@ def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
                     except:
                         continue
                 
-                print(f"方法2找到 {len(player_links_in_positive)} 個可能的Positive ranking連結")
+                print(f"Method 2 found {len(player_links_in_positive)} possible Positive ranking links")
                 
             except Exception as e:
-                print(f"方法2也失敗: {e}")
+                print(f"Method 2 also failed: {e}")
         
-        # 方法3：如果前兩種方法都失敗，取得所有玩家連結並過濾
+        # Method 3: If both methods fail, get all player links and filter
         if not player_links_in_positive:
-            print("嘗試方法3：取得所有玩家連結...")
+            print("Trying method 3: Getting all player links...")
             all_links = driver.find_elements(By.TAG_NAME, "a")
             for link in all_links:
                 href = link.get_attribute("href")
                 if href and "/player/" in href:
                     player_links_in_positive.append(link)
             
-            print(f"方法3找到 {len(player_links_in_positive)} 個玩家連結")
+            print(f"Method 3 found {len(player_links_in_positive)} player links")
             if len(player_links_in_positive) >= 60:
                 start_idx = len(player_links_in_positive) // 3
                 end_idx = start_idx + config.max_players_per_period
                 player_links_in_positive = player_links_in_positive[start_idx:end_idx]
-                print(f"過濾後保留 {len(player_links_in_positive)} 個Positive ranking連結")
+                print(f"After filtering, kept {len(player_links_in_positive)} Positive ranking links")
         
-        # 提取指定數量的不重複玩家URL
+        # Extract specified number of unique player URLs
         seen_players = set()
         for link in player_links_in_positive:
             href = link.get_attribute("href") if hasattr(link, 'get_attribute') else getattr(link, 'href', None)
@@ -575,22 +710,57 @@ def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
                         base_url = f"https://amae-koromo.sapk.ch/player/{player_id}/12"
                         url = f"{base_url}?limit={config.paipu_limit}"
                         player_urls.append(url)
-                        print(f"添加玩家URL ({period}): {url}")
+                        print(f"Added player URL ({period}): {url}")
                         
                         if len(player_urls) >= config.max_players_per_period:
                             break
         
     except Exception as e:
-        print(f"提取時間段 {period} 的玩家連結時出錯: {e}")
+        print(f"Error extracting player links for time period {period}: {e}")
     
     return player_urls
 
 def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfig):
-    """處理單個玩家的牌譜抓取"""
+    """Process paipu fetching for a single player"""
     chrome_options = Options()
+    
     if config.headless_mode:
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
+    
+    # Core fix: Do not use user-data-dir, use random port isolation
+    import random
+    remote_port = random.randint(9222, 65535)
+    chrome_options.add_argument(f"--remote-debugging-port={remote_port}")
+    
+    # Core stability parameters
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-software-rasterizer")
+    
+    # Disable various features that may cause conflicts
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--no-first-run")
+    chrome_options.add_argument("--no-default-browser-check")
+    chrome_options.add_argument("--disable-popup-blocking")
+    
+    # Prevent detection as automation tool
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # Log settings - strongly suppress all logs
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_argument("--silent")
+    chrome_options.add_argument("--disable-logging")
+    
+    # Set environment variables to suppress Chrome logs
+    os.environ['WDM_LOG_LEVEL'] = '0'
+    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+    
     driver = webdriver.Chrome(options=chrome_options)
+    apply_stealth_js(driver)  # Apply anti-detection
     
     try:
         driver.get(url)
@@ -598,8 +768,6 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
-        
-        time.sleep(2)
 
         while True:
             paipu_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='paipu=']")
@@ -616,22 +784,21 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
                     if paipu_id not in processed_paipu_ids:
                         processed_paipu_ids.append(paipu_id)
                         player_counts[url] += 1
-                        print(f"已寫入新的牌譜 ({url}):", paipu_id)
+                        print(f"Wrote new paipu ({url}):", paipu_id)
                         new_paipu_found = True
             
             driver.execute_script("window.scrollBy(0, 500);")
-            time.sleep(0.3)
+
 
             if driver.execute_script("return window.innerHeight + window.scrollY + 10 >= document.body.offsetHeight"):
                 break
                 
-            if not new_paipu_found:
-                time.sleep(1)
 
-        print(f"玩家 {url} 收集到 {player_counts[url]} 個牌譜ID")
+
+        print(f"Player {url} collected {player_counts[url]} paipu IDs")
         
     except Exception as e:
-        print(f"處理玩家 {url} 時出錯: {e}")
+        print(f"Error processing player {url}: {e}")
     finally:
         driver.quit()
 
@@ -639,82 +806,82 @@ class PaipuSpider(scrapy.Spider):
     name = "paipu_spider"
 
     def __init__(self, config_path: str = "crawler_config.json"):
-        # 載入配置
+        # Load configuration
         self.config = CrawlerConfig.from_json(config_path)
         self.config.validate()
         
         self.manager = multiprocessing.Manager()
         self.processed_paipu_ids = self.manager.list()
         
-        # 根據配置模式決定使用方式
+        # Decide usage method based on configuration mode
         if self.config.crawler_mode == "manual":
-            print("🔧 使用 Manual 模式（Legacy相容）...")
-            print(f"從配置檔案中讀取 {len(self.config.manual_player_urls)} 個手動設定的玩家URLs")
+            print("Using Manual mode (Legacy compatible)...")
+            print(f"Reading {len(self.config.manual_player_urls)} manually configured player URLs from config file")
             
-            # 使用配置檔案中的手動URLs
+            # Use manual URLs from configuration file
             self.player_urls = []
             for url in self.config.manual_player_urls:
-                # 確保URL格式正確，添加limit參數
+                # Ensure URL format is correct, add limit parameter
                 if "/player/" in url and "?limit=" not in url:
                     url = f"{url}?limit={self.config.paipu_limit}"
                 elif "/player/" in url and "?limit=" in url:
-                    # URL已經有limit參數，使用原始URL
+                    # URL already has limit parameter, use original URL
                     pass
                 else:
-                    print(f"⚠️  跳過無效的URL格式: {url}")
+                    print(f"Skipping invalid URL format: {url}")
                     continue
                 self.player_urls.append(url)
             
-            print(f"已載入 {len(self.player_urls)} 個有效的玩家URLs")
+            print(f"Loaded {len(self.player_urls)} valid player URLs")
             self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
             
         elif self.config.crawler_mode == "date_room":
-            print("📅 使用 date_room 模式...")
-            # date_room模式不需要player_urls
+            print("Using date_room mode...")
+            # date_room mode doesn't need player_urls
             self.player_urls = []
             self.player_counts = self.manager.dict()
             
         else:  # auto mode
-            print("🚀 使用自動化配置模式...")
-            print(f"配置摘要:")
-            print(f"  時間段: {[get_period_display_name(p) for p in self.config.time_periods]}")
-            print(f"  段位: {[get_rank_display_name(r) for r in self.config.ranks]}")
-            print(f"  每個時間段最多玩家數: {self.config.max_players_per_period}")
-            print(f"  牌譜限制: {self.config.paipu_limit}")
+            print("Using automated configuration mode...")
+            print(f"Configuration summary:")
+            print(f"  Time periods: {[get_period_display_name(p) for p in self.config.time_periods]}")
+            print(f"  Ranks: {[get_rank_display_name(r) for r in self.config.ranks]}")
+            print(f"  Max players per period: {self.config.max_players_per_period}")
+            print(f"  Paipu limit: {self.config.paipu_limit}")
             
             self.player_urls = get_top_players_urls(self.config)
             self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
 
-        # 讀取已有的牌譜ID（所有模式都需要）
+        # Read existing paipu IDs (all modes need this)
         try:
             with open(self.config.output_filename, "r") as file:
                 for line in file:
                     paipu_id = line.strip()
                     if paipu_id:
                         self.processed_paipu_ids.append(paipu_id)
-            print(f"已載入 {len(self.processed_paipu_ids)} 個已處理的牌譜ID")
+            print(f"Loaded {len(self.processed_paipu_ids)} processed paipu IDs")
         except FileNotFoundError:
-            print(f"未找到{self.config.output_filename}檔案，將建立新檔案")
+            print(f"{self.config.output_filename} file not found, will create new file")
 
     def start_requests(self):
         yield scrapy.Request(url="https://amae-koromo.sapk.ch", callback=self.start_crawling)
 
     def start_crawling(self, response):
         if self.config.crawler_mode == "date_room":
-            # date_room模式：直接調用收集函數
+            # date_room mode: Directly call collection function
             date_room_paipus = collect_paipus_by_date_room(self.config)
             
-            # 添加到processed_paipu_ids中（避免重複）
+            # Add to processed_paipu_ids (avoid duplicates)
             for paipu_id in date_room_paipus:
                 if paipu_id not in self.processed_paipu_ids:
                     self.processed_paipu_ids.append(paipu_id)
             
-            # 直接結束
+            # End directly
             self.spider_closed(None)
             
         else:
-            # 原有的auto和manual模式處理
-            print(f"開始處理 {len(self.player_urls)} 個玩家...")
+            # Original auto and manual mode processing
+            print(f"Starting to process {len(self.player_urls)} players...")
             
             processes = []
             for url in self.player_urls:
@@ -728,14 +895,14 @@ class PaipuSpider(scrapy.Spider):
             self.spider_closed(None)
 
     def spider_closed(self, reason):
-        print(f"共收集到 {len(self.processed_paipu_ids)} 個不重複的牌譜ID")
+        print(f"Total collected {len(self.processed_paipu_ids)} unique paipu IDs")
         
         if self.config.crawler_mode == "date_room":
-            print("\n📋 date_room模式配置摘要:")
-            print(f"  日期範圍: {self.config.start_date} 到 {self.config.end_date}")
-            print(f"  目標房間: {self.config.target_room}")
+            print("\ndate_room mode configuration summary:")
+            print(f"  Date range: {self.config.start_date} to {self.config.end_date}")
+            print(f"  Target room: {self.config.target_room}")
         else:
-            print("各玩家收集到的牌譜ID數量:")
+            print("Number of paipu IDs collected per player:")
             
             total_paipu = 0
             for url in self.player_urls:
@@ -743,17 +910,17 @@ class PaipuSpider(scrapy.Spider):
                 total_paipu += count
                 print(f"{url}: {count}")
             
-            print(f"\n總計收集牌譜數量: {total_paipu}")
+            print(f"\nTotal collected paipu count: {total_paipu}")
             
-            # 顯示配置摘要
+            # Display configuration summary
             if self.config.crawler_mode == "auto":
-                print(f"\n📋 使用的配置:")
-                print(f"  時間段: {', '.join([get_period_display_name(p) for p in self.config.time_periods])}")
-                print(f"  段位: {', '.join([get_rank_display_name(r) for r in self.config.ranks])}")
+                print(f"\nConfiguration used:")
+                print(f"  Time periods: {', '.join([get_period_display_name(p) for p in self.config.time_periods])}")
+                print(f"  Ranks: {', '.join([get_rank_display_name(r) for r in self.config.ranks])}")
         
         if self.config.save_screenshots and self.config.crawler_mode == "auto":
-            print(f"\n📸 驗證截圖已儲存:")
-            print(f"  - screenshot_rank_selection_verification.png (段位選擇驗證)")
+            print(f"\nVerification screenshots saved:")
+            print(f"  - screenshot_rank_selection_verification.png (rank selection verification)")
             for period in self.config.time_periods:
                 rank_suffix = "_".join(self.config.ranks).lower()
                 print(f"  - screenshot_{period}_positive_ranking_{rank_suffix}.png ({get_period_display_name(period)})")
@@ -765,19 +932,19 @@ class PaipuSpider(scrapy.Spider):
         with open(self.config.output_filename, "w") as file:
             for paipu_id in self.processed_paipu_ids:
                 file.write(paipu_id + "\n")
-        print(f"牌譜ID已儲存到 {self.config.output_filename}")
+        print(f"Paipu IDs saved to {self.config.output_filename}")
 
-# 建立預設配置檔案的函數
+# Function to create default configuration file
 def create_default_config():
-    """建立預設配置檔案"""
+    """Create default configuration file"""
     config = CrawlerConfig.get_default_config()
     config.save_to_json("crawler_config.json")
-    print("已建立預設配置檔案: crawler_config.json")
+    print("Created default configuration file: crawler_config.json")
     return config
 
-# 建立date_room模式的範例配置
+# Create example configuration for date_room mode
 def create_date_room_config_example():
-    """建立date_room模式的範例配置檔案"""
+    """Create example configuration file for date_room mode"""
     config = CrawlerConfig(
         crawler_mode="date_room",
         start_date="2019-08-20",
@@ -788,26 +955,26 @@ def create_date_room_config_example():
         save_screenshots=False
     )
     config.save_to_json("date_room_config_example.json")
-    print("已建立date_room模式範例配置檔案: date_room_config_example.json")
+    print("Created date_room mode example configuration file: date_room_config_example.json")
     return config
 
 # ==========================================
-# 使用說明和執行方式
+# Usage Instructions and Execution Method
 # ==========================================
 
 if __name__ == "__main__":
-    # 方式1：自動化配置模式（推薦）
-    # 在 crawler_config.json 中設定：
+    # Method 1: Automated configuration mode (Recommended)
+    # Configure in crawler_config.json:
     # {
     #   "crawler_mode": "auto",
     #   "time_periods": ["4w", "1w", "3d"],
     #   "ranks": ["Gold"],
     #   ...
     # }
-    # 執行命令：scrapy crawl paipu_spider
+    # Execute command: scrapy crawl paipu_spider
     
-    # 方式2：手動模式（Legacy Manual 相容）
-    # 在 crawler_config.json 中設定：
+    # Method 2: Manual mode (Legacy Manual compatible)
+    # Configure in crawler_config.json:
     # {
     #   "crawler_mode": "manual",
     #   "manual_player_urls": [
@@ -816,10 +983,10 @@ if __name__ == "__main__":
     #   ],
     #   ...
     # }
-    # 執行命令：scrapy crawl paipu_spider
+    # Execute command: scrapy crawl paipu_spider
     
-    # 方式3：date_room模式（新增）
-    # 在 crawler_config.json 中設定：
+    # Method 3: date_room mode (New)
+    # Configure in crawler_config.json:
     # {
     #   "crawler_mode": "date_room",
     #   "start_date": "2019-08-20",
@@ -829,22 +996,22 @@ if __name__ == "__main__":
     #   "headless_mode": true,
     #   "save_screenshots": true
     # }
-    # 執行命令：scrapy crawl paipu_spider
+    # Execute command: scrapy crawl paipu_spider
     
-    # 如果配置檔案不存在，建立預設配置
+    # If configuration file doesn't exist, create default configuration
     import os
     if not os.path.exists("crawler_config.json"):
         create_default_config()
-        print("已建立預設配置檔案: crawler_config.json")
-        print("請編輯配置檔案來自訂您的抓取設定")
-        print("\n📋 可用的配置模式:")
-        print("  - crawler_mode: 'auto' (自動化)")
-        print("  - crawler_mode: 'manual' (手動)")
-        print("  - crawler_mode: 'date_room' (日期房間模式)")
-        print("  - 詳細設定請參考配置檔案中的範例")
+        print("Created default configuration file: crawler_config.json")
+        print("Please edit the configuration file to customize your crawl settings")
+        print("\nAvailable configuration modes:")
+        print("  - crawler_mode: 'auto' (automated)")
+        print("  - crawler_mode: 'manual' (manual)")
+        print("  - crawler_mode: 'date_room' (date room mode)")
+        print("  - For detailed settings, refer to examples in the configuration file")
         
-        # 同時建立date_room模式的範例
+        # Also create example for date_room mode
         if not os.path.exists("date_room_config_example.json"):
             create_date_room_config_example()
     else:
-        print("發現現有配置檔案: crawler_config.json")
+        print("Found existing configuration file: crawler_config.json")
