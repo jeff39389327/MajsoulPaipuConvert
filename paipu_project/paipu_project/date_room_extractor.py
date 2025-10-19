@@ -34,8 +34,16 @@ SLEEP_TIME = 0  # Speed up
 
 class OptimizedPaipuExtractor:
     
-    def __init__(self, headless=True):
+    def __init__(self, headless=True, fast_mode=False):
+        """
+        Args:
+            headless: 是否使用无头模式
+            fast_mode: 快速模式（速度优先，可能漏掉少量数据）
+                      False: 完全模式，确保获取所有数据（慢但准确）
+                      True: 快速模式，跳过部分扫描（快但可能漏 5-10%）
+        """
         self.headless = headless
+        self.fast_mode = fast_mode
         self.driver = None
         self.temp_user_data_dir = None
         self.setup_driver()
@@ -79,7 +87,10 @@ class OptimizedPaipuExtractor:
         chrome_options.add_argument("--disable-infobars")
         chrome_options.add_argument("--disable-notifications")
         chrome_options.add_argument("--ignore-certificate-errors")
-        chrome_options.add_argument("--window-size=1920,1080")
+        # Larger window size for headless mode to ensure proper rendering
+        chrome_options.add_argument("--window-size=1920,3000")
+        # Force device scale factor
+        chrome_options.add_argument("--force-device-scale-factor=1")
         
         # Prevent detection as automation tool
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -107,6 +118,15 @@ class OptimizedPaipuExtractor:
         
         try:
             self.driver = webdriver.Chrome(options=chrome_options)
+            
+            # Set viewport size for headless mode (critical for virtual scrolling)
+            if self.headless:
+                self.driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
+                    'width': 1920,
+                    'height': 3000,
+                    'deviceScaleFactor': 1,
+                    'mobile': False
+                })
             
             # Enhanced anti-detection: Modify more browser features
             self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
@@ -195,7 +215,7 @@ class OptimizedPaipuExtractor:
                 })
         return room_urls
     
-    def wait_for_table_load(self, max_wait=10):
+    def wait_for_table_load(self, max_wait=20):
         import sys
         try:
             print(f"  Waiting for table elements to appear (max wait {max_wait} seconds)...", file=sys.stderr)
@@ -204,6 +224,22 @@ class OptimizedPaipuExtractor:
             )
             print(f"  Table elements appeared", file=sys.stderr)
 
+            # Critical for headless mode: Wait for JavaScript to fully initialize
+            wait_time = 1.5 if self.fast_mode else 2
+            time.sleep(wait_time)
+            
+            # Force trigger initial render in headless mode
+            if self.headless:
+                print(f"  Headless mode: Triggering initial content render...", file=sys.stderr)
+                # Scroll down and back up to force virtual list to render
+                self.driver.execute_script("window.scrollTo(0, 500);")
+                time.sleep(1)
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1)
+                # Force scroll events
+                self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+                self.driver.execute_script("window.dispatchEvent(new Event('resize'));")
+                time.sleep(2)
             
             # Check if there are game links
             game_links = self.driver.find_elements(By.XPATH, "//a[contains(@title, 'View game')]")
@@ -214,6 +250,21 @@ class OptimizedPaipuExtractor:
                 # Try other ways to check
                 all_links = self.driver.find_elements(By.TAG_NAME, "a")
                 print(f"  Page has a total of {len(all_links)} links", file=sys.stderr)
+                
+                # In headless mode, try more aggressive rendering
+                if self.headless:
+                    print(f"  Headless mode: Attempting aggressive render trigger...", file=sys.stderr)
+                    for i in range(3):
+                        self.driver.execute_script(f"window.scrollTo(0, {(i+1)*300});")
+                        time.sleep(1)
+                    self.driver.execute_script("window.scrollTo(0, 0);")
+                    time.sleep(2)
+                    
+                    game_links = self.driver.find_elements(By.XPATH, "//a[contains(@title, 'View game')]")
+                    print(f"  After aggressive render: Found {len(game_links)} game links", file=sys.stderr)
+                    if len(game_links) > 0:
+                        return True
+                
                 return False
             
             return True
@@ -242,6 +293,50 @@ class OptimizedPaipuExtractor:
             return rect['bottom'] > 0 and rect['top'] < viewport_height
         except:
             return False
+    
+    def close_dialog(self):
+        """Close the game details dialog"""
+        try:
+            # Try multiple methods to close dialog
+            # Method 1: Press ESC key
+            self.driver.execute_script("""
+                document.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    keyCode: 27,
+                    code: 'Escape',
+                    bubbles: true
+                }));
+            """)
+            time.sleep(0.1)
+            
+            # Method 2: Click backdrop (outside dialog)
+            self.driver.execute_script("""
+                var backdrop = document.querySelector('div[class*="backdrop"]') || 
+                              document.querySelector('[role="presentation"]');
+                if (backdrop) {
+                    backdrop.click();
+                }
+            """)
+            time.sleep(0.1)
+            
+            # Method 3: Click close button if exists
+            self.driver.execute_script("""
+                var dialog = document.querySelector('div[role="dialog"]');
+                if (dialog) {
+                    var closeBtn = dialog.querySelector('button[aria-label*="close"]') ||
+                                   dialog.querySelector('button[aria-label*="關閉"]') ||
+                                   dialog.querySelector('button[type="button"]');
+                    if (closeBtn) {
+                        closeBtn.click();
+                    }
+                }
+            """)
+        except:
+            # Fallback: go back
+            try:
+                self.driver.back()
+            except:
+                pass
     
     def find_5data_url_in_page(self):
         try:
@@ -368,32 +463,49 @@ class OptimizedPaipuExtractor:
             except:
                 return None, session_id
             
-            # 快速查找 API URL
-            api_url = self.find_5data_url_in_page()
+            # Wait for dialog to appear with API URL
+            api_url = None
+            wait_start = time.time()
+            max_wait = 3.0  # Maximum 3 seconds wait
+            
+            while time.time() - wait_start < max_wait:
+                # Check if dialog with 5-data link appeared
+                api_url = self.driver.execute_script("""
+                    var dialog = document.querySelector('div[role="dialog"]');
+                    if (dialog) {
+                        var links = dialog.querySelectorAll('a[href*="5-data.amae-koromo.com"]');
+                        for (var i = 0; i < links.length; i++) {
+                            var href = links[i].href;
+                            if (href && href.indexOf('view_game') > -1) {
+                                return href;
+                            }
+                        }
+                    }
+                    return null;
+                """)
+                
+                if api_url:
+                    break
+                    
+                time.sleep(0.05)  # Check every 50ms
             
             if api_url:
                 raw_paipu_id = self.extract_paipu_via_redirect(api_url)
                 if raw_paipu_id:
                     clean_paipu_id = self.clean_paipu_id(raw_paipu_id)
                     if clean_paipu_id and self.is_valid_paipu_id(clean_paipu_id):
-                        # 快速返回（優先使用 ESC）
-                        try:
-                            self.driver.execute_script("document.querySelector('body').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27}));")
-                        except:
-                            self.driver.back()
-                        
+                        # Close dialog by clicking outside or ESC
+                        self.close_dialog()
                         return clean_paipu_id, session_id
             
-            # 快速返回
-            try:
-                self.driver.execute_script("document.querySelector('body').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27}));")
-            except:
-                self.driver.back()
+            # Close dialog if extraction failed
+            self.close_dialog()
             
             return None, session_id
-        except:
+        except Exception as e:
+            # Close dialog on error
             try:
-                self.driver.back()
+                self.close_dialog()
             except:
                 pass
             return None, None
@@ -419,18 +531,62 @@ class OptimizedPaipuExtractor:
                 return []
             print(f"Table loaded successfully", file=sys.stderr)
             
+            # Additional wait for headless mode to ensure full initialization
+            if self.headless:
+                wait_time = 1.5 if self.fast_mode else 3
+                print(f"  Headless mode: Extra initialization wait ({wait_time}s)...", file=sys.stderr)
+                time.sleep(wait_time)
+                
+                # # Debug: Save screenshot in headless mode to verify page loaded
+                # try:
+                #     screenshot_path = f"debug_headless_{room_info['date']}_{room_info['room_number']}.png"
+                #     self.driver.save_screenshot(screenshot_path)
+                #     print(f"  Debug screenshot saved: {screenshot_path}", file=sys.stderr)
+                # except:
+                #     pass
+            
             # Get initial page information
             initial_page_height = self.driver.execute_script("return document.body.scrollHeight;")
             print(f"  Initial page height: {initial_page_height}px", file=sys.stderr)
             
             self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
 
             print(f"Reset scroll position to top", file=sys.stderr)
             
+            # Warm-up scrolling for headless mode to initialize virtual scrolling
+            if self.headless:
+                if self.fast_mode:
+                    # Fast mode: minimal warmup
+                    print(f"  Fast mode: Quick warmup...", file=sys.stderr)
+                    self.driver.execute_script("window.scrollTo(0, 600);")
+                    self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+                    time.sleep(0.5)
+                    self.driver.execute_script("window.scrollTo(0, 0);")
+                    time.sleep(0.5)
+                else:
+                    print(f"  Headless mode: Warming up virtual scroll...", file=sys.stderr)
+                    for warmup in range(3):
+                        self.driver.execute_script(f"window.scrollTo(0, {(warmup+1)*400});")
+                        self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+                        time.sleep(0.8)
+                    self.driver.execute_script("window.scrollTo(0, 0);")
+                    time.sleep(1)
+                    print(f"  Warm-up complete", file=sys.stderr)
+            
             scroll_position = 0
-            scroll_step = 1200  # Super fast scroll: 1200 pixels
+            # Adjust scroll speed based on mode
+            if self.fast_mode:
+                scroll_step = 800  # Fast mode: balanced (same processing, larger steps)
+            elif self.headless:
+                scroll_step = 600  # Headless careful: 600 pixels
+            else:
+                scroll_step = 800  # Normal mode: 800 pixels
             max_scroll_attempts = 99999999 
             consecutive_no_new = 0
+            
+            if self.fast_mode:
+                print(f"  ⚡ Fast mode: scroll={scroll_step}px, threshold=80, full_processing=enabled", file=sys.stderr)
             
             print(f"\nStarting scroll processing loop...", file=sys.stderr)
             
@@ -439,6 +595,7 @@ class OptimizedPaipuExtractor:
                     print(f"\nReached target paipu count ({max_paipus}), stopping scroll", file=sys.stderr)
                     break
                 
+                # Re-fetch page dimensions each iteration (important for dynamic virtual scrolling)
                 current_position = self.driver.execute_script("return window.pageYOffset;")
                 viewport_height = self.driver.execute_script("return window.innerHeight;")
                 page_height = self.driver.execute_script("return document.body.scrollHeight;")
@@ -462,7 +619,13 @@ class OptimizedPaipuExtractor:
                             print(f"  Health check failed: {e}", file=sys.stderr)
                 
                 processed_any = False
-                max_attempts_per_scroll = 5  # Reduced to 5, speed up scrolling
+                # Adjust attempts based on mode
+                if self.fast_mode:
+                    max_attempts_per_scroll = 10  # Fast: must process all visible games
+                elif self.headless:
+                    max_attempts_per_scroll = 15  # Headless: more thorough
+                else:
+                    max_attempts_per_scroll = 10  # Normal mode
                 
                 for attempt in range(max_attempts_per_scroll):
                     if len(extracted_paipus) >= max_paipus:
@@ -490,26 +653,63 @@ class OptimizedPaipuExtractor:
                 
                 if not processed_any:
                     consecutive_no_new += 1
-                    if consecutive_no_new >= 50:  # Fast scrolling needs larger buffer
+                    # Adjust patience based on mode
+                    if self.fast_mode:
+                        threshold = 100  # Fast: balanced (rely on reverse/final scan for safety)
+                    elif self.headless:
+                        threshold = 150  # Headless: more patience
+                    else:
+                        threshold = 100  # Normal
+                    if consecutive_no_new >= threshold:
                         print(f"\n{consecutive_no_new} consecutive scrolls with no new paipus, stopping processing", file=sys.stderr)
                         break
                 else:
                     consecutive_no_new = 0
                 
                 # Check if reached page bottom
+                # Important: Don't break immediately, check multiple times to handle dynamic height changes
                 if current_position + viewport_height >= page_height - 50:
-                    print(f"\nReached page bottom (position: {current_position}+{viewport_height} >= {page_height})", file=sys.stderr)
-                    break
+                    # Verify we're really at bottom by checking if new scroll attempts don't move
+                    old_height = page_height
+                    time.sleep(0.5)
+                    new_height = self.driver.execute_script("return document.body.scrollHeight;")
+                    new_position = self.driver.execute_script("return window.pageYOffset;")
+                    
+                    print(f"\nPossible bottom detected: pos={new_position}, height={new_height} (was {old_height})", file=sys.stderr)
+                    
+                    # Only break if height is stable and we're really at bottom
+                    if new_position + viewport_height >= new_height - 50 and abs(new_height - old_height) < 100:
+                        print(f"Confirmed page bottom reached", file=sys.stderr)
+                        break
+                    else:
+                        print(f"False alarm - page height changed, continuing scroll...", file=sys.stderr)
+                        # Update page_height for next iteration
+                        page_height = new_height
                 
                 # Execute scroll
                 scroll_position += scroll_step
+                
+                # Handle case where page height shrinks during scroll (common with virtual scrolling)
+                current_page_height = self.driver.execute_script("return document.body.scrollHeight;")
+                if scroll_position > current_page_height - viewport_height:
+                    # Adjust to not exceed page bounds
+                    old_scroll_pos = scroll_position
+                    scroll_position = max(0, current_page_height - viewport_height)
+                    if scroll_count % 50 == 0 and old_scroll_pos != scroll_position:
+                        print(f"  Adjusted scroll position: {old_scroll_pos} -> {scroll_position} (page height: {current_page_height})", file=sys.stderr)
+                
                 self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
                 
                 # Force trigger page re-render (important for virtual scrolling)
                 self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
                 
-                # Wait for content to load (speed up: 0.8 -> 0.3)
-
+                # Wait for content to load - critical for virtual scrolling!
+                if self.fast_mode:
+                    time.sleep(0.5)  # Fast: must wait enough for processing (NOT just rendering)
+                elif self.headless:
+                    time.sleep(0.8)  # Headless: more wait
+                else:
+                    time.sleep(0.5)  # Normal
                 
                 # Check if scroll actually moved
                 new_position = self.driver.execute_script("return window.pageYOffset;")
@@ -518,7 +718,163 @@ class OptimizedPaipuExtractor:
                         print(f"  Warning: Scroll not effective! Position stays at {current_position}", file=sys.stderr)
                     # Try different way to scroll
                     self.driver.execute_script(f"window.scrollBy(0, {scroll_step});")
-
+            
+            # Headless mode: Reverse scroll from bottom to top
+            # Fast mode uses a quicker version
+            if self.headless:
+                print(f"\n{'-'*60}", file=sys.stderr)
+                print(f"Headless mode: Performing reverse scan (bottom to top)...", file=sys.stderr)
+                
+                # Scroll to bottom first
+                page_height = self.driver.execute_script("return document.body.scrollHeight;")
+                self.driver.execute_script(f"window.scrollTo(0, {page_height});")
+                time.sleep(2)
+                
+                reverse_found = 0
+                # Adjust reverse scan based on mode
+                if self.fast_mode:
+                    reverse_step = -800   # Fast: balanced steps
+                    max_reverse_iterations = 100  # More iterations for coverage
+                    reverse_attempts = 10         # More attempts for reliability
+                    reverse_wait = 0.4            # Adequate wait
+                else:
+                    reverse_step = -600  # Normal: smaller steps
+                    max_reverse_iterations = 200
+                    reverse_attempts = 15
+                    reverse_wait = 0.5
+                
+                reverse_position = page_height
+                
+                for rev_count in range(max_reverse_iterations):
+                    if len(extracted_paipus) >= max_paipus:
+                        break
+                    
+                    for attempt in range(reverse_attempts):
+                        if len(extracted_paipus) >= max_paipus:
+                            break
+                        
+                        unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
+                        if unprocessed_game:
+                            paipu_id, session_id = self.click_game_and_extract_paipu_safe(
+                                unprocessed_game, room_info
+                            )
+                            if paipu_id and paipu_id not in extracted_paipus:
+                                extracted_paipus.append(paipu_id)
+                                processed_session_ids.add(session_id)
+                                reverse_found += 1
+                                print(f"  Reverse scan found paipu #{len(extracted_paipus)}: {paipu_id}", file=sys.stderr)
+                            elif session_id:
+                                processed_session_ids.add(session_id)
+                        else:
+                            break
+                    
+                    # Check if at top
+                    current_pos = self.driver.execute_script("return window.pageYOffset;")
+                    if current_pos <= 100:
+                        print(f"  Reverse scan reached top", file=sys.stderr)
+                        break
+                    
+                    reverse_position += reverse_step
+                    if reverse_position < 0:
+                        reverse_position = 0
+                    self.driver.execute_script(f"window.scrollTo(0, {reverse_position});")
+                    self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+                    time.sleep(reverse_wait)
+                
+                print(f"Reverse scan completed: found {reverse_found} additional paipus", file=sys.stderr)
+                print(f"{'-'*60}\n", file=sys.stderr)
+            
+            # Final sweep: Multiple passes to catch any missed paipus
+            print(f"\n{'-'*60}", file=sys.stderr)
+            if self.fast_mode:
+                print(f"⚡ Fast mode: Performing quick final sweep...", file=sys.stderr)
+                num_sweeps = 1  # Fast mode: one quick sweep
+            else:
+                print(f"Performing final sweep to catch any missed paipus...", file=sys.stderr)
+                # Headless mode: Do 2 complete sweeps for better coverage
+                num_sweeps = 2 if self.headless else 1
+            
+            total_final_found = 0
+            
+            for sweep_pass in range(num_sweeps):
+                if sweep_pass > 0:
+                    print(f"  Starting sweep pass {sweep_pass + 1}/{num_sweeps}...", file=sys.stderr)
+                
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1.5 if self.headless else 1)
+                
+                final_sweep_scroll = 0
+                # Adjust sweep step based on mode
+                if self.fast_mode:
+                    final_sweep_step = 600  # Fast: smaller steps for coverage
+                elif self.headless:
+                    final_sweep_step = 400  # Headless: very small steps
+                else:
+                    final_sweep_step = 500  # Normal steps
+                final_sweep_found = 0
+                
+                # Adjust iterations based on mode
+                max_iterations = 120 if self.fast_mode else 300  # More for coverage
+                for sweep_count in range(max_iterations):
+                    if len(extracted_paipus) >= max_paipus:
+                        break
+                    
+                    # Adjust attempts per position based on mode
+                    if self.fast_mode:
+                        sweep_attempts = 8   # Fast: more for reliability
+                    elif self.headless:
+                        sweep_attempts = 15
+                    else:
+                        sweep_attempts = 10
+                    for attempt in range(sweep_attempts):
+                        if len(extracted_paipus) >= max_paipus:
+                            break
+                        
+                        unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
+                        if unprocessed_game:
+                            paipu_id, session_id = self.click_game_and_extract_paipu_safe(
+                                unprocessed_game, room_info
+                            )
+                            if paipu_id and paipu_id not in extracted_paipus:
+                                extracted_paipus.append(paipu_id)
+                                processed_session_ids.add(session_id)
+                                final_sweep_found += 1
+                                print(f"  Final sweep pass {sweep_pass + 1} found paipu #{len(extracted_paipus)}: {paipu_id}", file=sys.stderr)
+                            elif session_id:
+                                processed_session_ids.add(session_id)
+                        else:
+                            break
+                    
+                    # Check if at bottom (with dynamic height verification)
+                    current_pos = self.driver.execute_script("return window.pageYOffset;")
+                    viewport_h = self.driver.execute_script("return window.innerHeight;")
+                    page_h = self.driver.execute_script("return document.body.scrollHeight;")
+                    if current_pos + viewport_h >= page_h - 50:
+                        # Verify we're really at bottom
+                        time.sleep(0.3)
+                        new_page_h = self.driver.execute_script("return document.body.scrollHeight;")
+                        if abs(new_page_h - page_h) < 100:
+                            print(f"  Final sweep reached bottom", file=sys.stderr)
+                            break
+                        # If page height changed significantly, continue scanning
+                    
+                    final_sweep_scroll += final_sweep_step
+                    self.driver.execute_script(f"window.scrollTo(0, {final_sweep_scroll});")
+                    # Trigger scroll event explicitly
+                    self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+                    # Adjust wait time based on mode
+                    if self.fast_mode:
+                        time.sleep(0.3)  # Fast: adequate wait for processing
+                    elif self.headless:
+                        time.sleep(0.5)
+                    else:
+                        time.sleep(0.3)
+                
+                total_final_found += final_sweep_found
+                print(f"  Sweep pass {sweep_pass + 1} completed: found {final_sweep_found} additional paipus", file=sys.stderr)
+            
+            print(f"All final sweeps completed: found {total_final_found} additional paipus total", file=sys.stderr)
+            print(f"{'-'*60}\n", file=sys.stderr)
             
             print(f"\n{'='*60}", file=sys.stderr)
             print(f"Room processing completed: {room_info['rank']}", file=sys.stderr)
@@ -589,10 +945,11 @@ def main():
     target_ranks = ["Throne"]
     max_paipus = 99999
     headless_mode = True
+    fast_mode = False  # 快速模式：True=快速但可能漏5-10%, False=完整但较慢
     
     target_ranks = convert_ranks_to_english(target_ranks)
     
-    extractor = OptimizedPaipuExtractor(headless=headless_mode)
+    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode)
     
     try:
         results = extractor.extract_from_rooms(

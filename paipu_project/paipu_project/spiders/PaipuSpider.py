@@ -5,8 +5,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 import time
-import multiprocessing
-from concurrent.futures import ThreadPoolExecutor
 import re
 import json
 from dataclasses import dataclass
@@ -51,6 +49,9 @@ class CrawlerConfig:
     
     # Enable headless mode
     headless_mode: bool = True
+    
+    # Fast mode (for large-scale collection, may miss 5-10% data)
+    fast_mode: bool = False
     
     # Save verification screenshots
     save_screenshots: bool = True
@@ -238,7 +239,7 @@ def get_period_display_name(period: str) -> str:
     }
     return period_mapping.get(period, period)
 
-def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True) -> List[str]:
+def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False) -> List[str]:
     """
     Execute date_room_extractor.py and get the output paipu ID list
     
@@ -246,6 +247,7 @@ def execute_date_room_extractor_py(target_date: str, target_room: str, headless_
         target_date: Target date (format: "2019-08-23")
         target_room: Target room (e.g.: "Throne", "Jade", "Gold", etc.)
         headless_mode: Whether to use headless mode
+        fast_mode: Whether to use fast mode (faster but may miss 5-10% data)
         
     Returns:
         List of paipu IDs
@@ -262,10 +264,11 @@ def main():
     target_ranks = ["{target_room}"]
     max_paipus = 99999
     headless_mode = {headless_mode}
+    fast_mode = {fast_mode}
     
     target_ranks = convert_ranks_to_english(target_ranks)
     
-    extractor = OptimizedPaipuExtractor(headless=headless_mode)
+    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode)
     
     try:
         results = extractor.extract_from_rooms(
@@ -286,7 +289,8 @@ if __name__ == "__main__":
 """.format(
         target_date=target_date,
         target_room=target_room,
-        headless_mode=str(headless_mode)
+        headless_mode=str(headless_mode),
+        fast_mode=str(fast_mode)
     )
     
     # Create temporary file
@@ -332,14 +336,15 @@ if __name__ == "__main__":
 def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
     """Collect paipus using date_room mode"""
     all_paipus = []
+    interrupted = False
     
     # Setup interrupt handler
     def signal_handler(sig, frame):
+        nonlocal interrupted
         print(f"\n\nInterrupt signal received (Ctrl+C)")
         print(f"Currently collected {len(all_paipus)} paipus")
         print(f"Saving data...")
-        # Data will be saved in finally block
-        sys.exit(0)
+        interrupted = True
     
     signal.signal(signal.SIGINT, signal_handler)
     
@@ -356,6 +361,7 @@ def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
         print(f"Date range: {config.start_date} to {config.end_date} (total {total_days} days)")
         print(f"Target room: {config.target_room}")
         print(f"Headless mode: {'Enabled' if config.headless_mode else 'Disabled'}")
+        print(f"Fast mode: {' Enabled' if config.fast_mode else 'Disabled (complete)'}")
         print(f"Output file: {config.output_filename}")
         print(f"{'='*70}\n")
         
@@ -364,7 +370,7 @@ def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
         day_count = 0
         start_time = time.time()
         
-        while current_date <= end_date:
+        while current_date <= end_date and not interrupted:
             day_count += 1
             date_str = current_date.strftime("%Y-%m-%d")
             day_start = time.time()
@@ -378,13 +384,19 @@ def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
                 day_results = execute_date_room_extractor_py(
                     target_date=date_str,
                     target_room=config.target_room,
-                    headless_mode=config.headless_mode
+                    headless_mode=config.headless_mode,
+                    fast_mode=config.fast_mode
                 )
             except Exception as e:
                 print(f"Error processing {date_str}: {e}")
                 import traceback
                 traceback.print_exc()
                 day_results = []
+            
+            # 檢查是否被中斷
+            if interrupted:
+                print(f"\nCollection interrupted by user")
+                break
             
             # Add to total list (date_room_extractor.py already deduplicates, but ensure cross-date deduplication here)
             new_paipus = 0
@@ -416,12 +428,16 @@ def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
         
         total_time = time.time() - start_time
         print(f"\n{'='*70}")
-        print(f"date_room mode collection completed!")
+        if interrupted:
+            print(f"date_room mode collection interrupted by user!")
+        else:
+            print(f"date_room mode collection completed!")
         print(f"{'='*70}")
         print(f"Total collected: {len(all_paipus)} unique paipu IDs")
-        print(f"Days processed: {total_days} days")
+        print(f"Days processed: {day_count} days")
         print(f"Total time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
-        print(f"Average speed: {len(all_paipus)/total_time*60:.1f} paipus/minute")
+        if len(all_paipus) > 0 and total_time > 0:
+            print(f"Average speed: {len(all_paipus)/total_time*60:.1f} paipus/minute")
         print(f"{'='*70}\n")
         
     except Exception as e:
@@ -787,11 +803,11 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
                         print(f"Wrote new paipu ({url}):", paipu_id)
                         new_paipu_found = True
             
-            driver.execute_script("window.scrollBy(0, 500);")
-
-
+            # 檢查是否已經滾動到底部
             if driver.execute_script("return window.innerHeight + window.scrollY + 10 >= document.body.offsetHeight"):
                 break
+            
+            driver.execute_script("window.scrollBy(0, 500);")
                 
 
 
@@ -810,8 +826,7 @@ class PaipuSpider(scrapy.Spider):
         self.config = CrawlerConfig.from_json(config_path)
         self.config.validate()
         
-        self.manager = multiprocessing.Manager()
-        self.processed_paipu_ids = self.manager.list()
+        self.processed_paipu_ids = []
         
         # Decide usage method based on configuration mode
         if self.config.crawler_mode == "manual":
@@ -833,13 +848,13 @@ class PaipuSpider(scrapy.Spider):
                 self.player_urls.append(url)
             
             print(f"Loaded {len(self.player_urls)} valid player URLs")
-            self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
+            self.player_counts = {url: 0 for url in self.player_urls}
             
         elif self.config.crawler_mode == "date_room":
             print("Using date_room mode...")
             # date_room mode doesn't need player_urls
             self.player_urls = []
-            self.player_counts = self.manager.dict()
+            self.player_counts = {}
             
         else:  # auto mode
             print("Using automated configuration mode...")
@@ -850,7 +865,7 @@ class PaipuSpider(scrapy.Spider):
             print(f"  Paipu limit: {self.config.paipu_limit}")
             
             self.player_urls = get_top_players_urls(self.config)
-            self.player_counts = self.manager.dict({url: 0 for url in self.player_urls})
+            self.player_counts = {url: 0 for url in self.player_urls}
 
         # Read existing paipu IDs (all modes need this)
         try:
@@ -883,14 +898,8 @@ class PaipuSpider(scrapy.Spider):
             # Original auto and manual mode processing
             print(f"Starting to process {len(self.player_urls)} players...")
             
-            processes = []
             for url in self.player_urls:
-                process = multiprocessing.Process(target=process_player, args=(url, self.processed_paipu_ids, self.player_counts, self.config))
-                processes.append(process)
-                process.start()
-
-            for process in processes:
-                process.join()
+                process_player(url, self.processed_paipu_ids, self.player_counts, self.config)
 
             self.spider_closed(None)
 
@@ -905,10 +914,15 @@ class PaipuSpider(scrapy.Spider):
             print("Number of paipu IDs collected per player:")
             
             total_paipu = 0
-            for url in self.player_urls:
+            # 限制顯示的玩家數量，避免輸出過多
+            max_display = 10
+            for i, url in enumerate(self.player_urls):
                 count = self.player_counts[url]
                 total_paipu += count
-                print(f"{url}: {count}")
+                if i < max_display:
+                    print(f"{url}: {count}")
+                elif i == max_display:
+                    print(f"... and {len(self.player_urls) - max_display} more players")
             
             print(f"\nTotal collected paipu count: {total_paipu}")
             
@@ -925,11 +939,11 @@ class PaipuSpider(scrapy.Spider):
                 rank_suffix = "_".join(self.config.ranks).lower()
                 print(f"  - screenshot_{period}_positive_ranking_{rank_suffix}.png ({get_period_display_name(period)})")
 
-        with ThreadPoolExecutor() as executor:
-            executor.submit(self.write_to_file)
+        print("Saving data...")
+        self.write_to_file()
 
     def write_to_file(self):
-        with open(self.config.output_filename, "w") as file:
+        with open(self.config.output_filename, "w", encoding='utf-8') as file:
             for paipu_id in self.processed_paipu_ids:
                 file.write(paipu_id + "\n")
         print(f"Paipu IDs saved to {self.config.output_filename}")
