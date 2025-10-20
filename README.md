@@ -1,94 +1,59 @@
-# <div align="center">**MajsoulPaipuConvert**</div>
+# MajsoulPaipuConvert
 
-## Integration Project
-**Convert Mahjong Soul game logs to MJAI format using mjai-reviewer and tensoul-py-ng**
+Tool for converting Mahjong Soul game logs to MJAI format.
 
-This tool downloads game logs from MajSoul Stats and converts them to the MJAI format with a configurable crawler system for flexible data collection.
+## Introduction
 
-## ⚠️ Important Notes
-- This tool collects data from third-party websites and games
-- Only supports 4-player mahjong (三麻/3-player requires modifications to mjai-reviewer)
+Download game logs from MajSoul Stats and convert them to MJAI format. Supports automated crawling and manual player specification.
+
+**Important Notes:**
+- Only supports 4-player mahjong (3-player requires mjai-reviewer modifications)
 - Currently only compatible with CN server
-- Uses mjai-reviewer (Apache-2.0 License)
-- Uses tensoul-py-ng for Mahjong Soul log downloading in tenhou.net/6 format
+- Requires CN server account (username/password login supported)
 
-> If you find any missing attributions or licensing issues, please submit an ISSUE. Your feedback helps us maintain proper attribution and licensing compliance.
+## Features
 
-## ✨ New Features
-- 🎯 **Unified Configuration**: Single JSON config file for all modes
-- 🔄 **Mode Switching**: Easily switch between auto/manual modes 
-- 🚀 **Automated Collection**: Auto-collect from ranking leaderboards
-- 📊 **Multi-Rank Support**: Throne/Jade/Gold + East variants
-- ⏰ **Multi-Period**: 4w/1w/3d/1d rankings
-- 🔧 **Legacy Compatible**: Full support for manual player selection
-- 📝 **Validation**: Automatic configuration validation with helpful error messages
-- 🔄 **Migration**: Migrated to tensoul-py-ng for direct tenhou.net/6 format output
-- ⏱️ **Think Time Collection**: Automatically collect and inject player thinking time (milliseconds) into MJAI format
-- 📅 **Date Room Mode**: Bulk collect game logs from specific date ranges (2019-08-23 onwards for Throne/Jade)
-- ⚡ **Fast Mode**: Optional speed optimization for large-scale data collection (configurable in date_room mode)
+- Unified configuration file for all modes
+- Three modes: auto leaderboard, manual player, date room batch
+- Supported ranks: Throne/Jade/Gold and East variants
+- Supported periods: 4w/1w/3d/1d
+- Automatic thinking time collection (optional)
+- Direct tenhou.net/6 format output
 
-## 🔄 Recent Updates
+## Requirements
 
-### v2.1.0 - Date Room Mode Optimization (2025-01)
-**Critical Bug Fixes:**
-- 🐛 **Fixed dialog detection**: Added proper wait logic for game detail dialog popups
-- 🐛 **Fixed dynamic page heights**: Handles virtual scrolling page size changes (e.g., 13355px → 6355px)
-- 🐛 **Fixed premature termination**: Smart bottom detection with height stability verification
-- ✅ **100% collection accuracy**: Now correctly collects all games (e.g., 78/78 instead of 10/78)
-
-**Performance Improvements:**
-- ⚡ **Dialog wait optimization**: Efficient polling (50ms intervals, max 3 seconds)
-- ⚡ **Smart dialog closing**: Multiple fallback methods (ESC key, backdrop click, close button)
-- ⚡ **Adaptive scrolling**: Automatically adjusts scroll position when page height changes
-- 🔄 **Enhanced reverse scan**: More thorough multi-pass verification
-- 📊 **Improved speed**: Maintained ~30-40 paipus/minute while achieving 100% accuracy
-
-**Technical Details:**
-- ReactVirtualized list handling with dynamic content rendering
-- Dialog-based game detail extraction with proper async waiting
-- Multi-stage scanning (forward scroll → reverse scan → final sweeps)
-- Headless mode optimizations for production use
-
-### Migration Notes
-This project now uses `tensoul-py-ng` for improved:
-- **Direct Format**: Downloads directly in tenhou.net/6 format, eliminating conversion steps
-- **Stability**: Better error handling and connection management
-- **Compatibility**: Native support for Mahjong Soul CN server
-- **Simplified Pipeline**: Reduced dependencies and processing steps
-
-## Prerequisites
-Before installation, ensure you have:
 - Python 3.8+
-- pip (Python package manager)
+- pip
 - Git
 - Google Chrome + ChromeDriver
+- [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer)
 
-## Installation and Setup
+## Installation
 
-### **Step 1: Install Dependencies**
+### 1. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 pip install scrapy selenium
 ```
 
-**Required External Tools:**
-- Install [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer)
-  - Ensure it's added to your system PATH or properly referenced in your configuration
+### 2. Install External Tools
+
+- Install [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) and add to system PATH
 - Install [Google Chrome](https://www.google.com/chrome/)
 - Download matching [ChromeDriver](https://chromedriver.chromium.org/) and add to PATH
 
-### **Step 2: Configuration**
+## Configuration
 
-#### **2.1 Configure Crawler Settings**
-Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` directory:
+### Crawler Configuration
 
-**🎯 Choose Your Mode:**
+Create or modify `crawler_config.json` in `paipu_project/paipu_project/` directory:
 
-**Option A: Automated Mode (For Positive Ranking crawling)**
+#### Mode A: Auto Mode (Crawl from Leaderboard)
+
 ```json
 {
   "crawler_mode": "auto",
-  "manual_player_urls": [],
   "time_periods": ["4w", "1w", "3d"],
   "ranks": ["Gold"],
   "max_players_per_period": 20,
@@ -99,30 +64,28 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
-**Option B: Manual Mode ( For Specific Player crawling)**
+#### Mode B: Manual Mode (Specify Players)
+
 ```json
 {
   "crawler_mode": "manual",
   "manual_player_urls": [
     "https://amae-koromo.sapk.ch/player/123456789/12",
-    "https://amae-koromo.sapk.ch/player/987654321/12",
-    "https://amae-koromo.sapk.ch/player/555666777/12"
+    "https://amae-koromo.sapk.ch/player/987654321/12"
   ],
-  "time_periods": [],
-  "ranks": [],
-  "max_players_per_period": 20,
   "paipu_limit": 9999,
   "output_filename": "manual_paipu.txt",
-  "headless_mode": true,
-  "save_screenshots": false
+  "headless_mode": true
 }
 ```
-**Option C: Date Room Mode ( For Date Range Bulk crawling)**
+
+#### Mode C: Date Room Mode (Batch Crawl Date Range)
+
 ```json
 {
   "crawler_mode": "date_room",
   "start_date": "2019-08-20",
-  "end_date": "2019-08-23", 
+  "end_date": "2019-08-23",
   "target_room": "Jade",
   "output_filename": "date_room_list.txt",
   "headless_mode": true,
@@ -130,278 +93,125 @@ Create or modify `crawler_config.json` in the `paipu_project/paipu_project/` dir
 }
 ```
 
-**Date Room Mode Features:**
-- 📅 **Bulk Collection**: Collect all games from specific date ranges
-- 🎯 **100% Accuracy**: Advanced dialog detection and virtual scrolling handling
-- 🚀 **Dynamic Page Heights**: Automatically adapts to varying page sizes
-- ⚡ **Fast Mode**: Optional speed optimization (set `"fast_mode": true`)
-  - Full mode (default): ~30-40 paipus/minute, 100% accuracy
-  - Fast mode: ~35-45 paipus/minute, optimized for large-scale collection
-- 🔄 **Reverse Scanning**: Multi-pass verification ensures no data is missed
-- 💪 **Robust**: Handles dialog popups, dynamic content, and virtual scrolling
+**Date Room Mode Notes:**
+- Applicable for Throne/Jade rank data from 2019-08-23 onwards
+- fast_mode: false for complete mode (100% accuracy, ~30-40 records/min)
+- fast_mode: true for fast mode (slightly faster, suitable for large-scale collection)
 
-**Configuration Parameters:**
+### Configuration Parameters
 
 | Parameter | Description | Options | Default |
 |-----------|-------------|---------|---------|
-| `crawler_mode` | **Crawler mode** | `"auto"`, `"manual"` | `"auto"` |
-| `manual_player_urls` | **Manual player URLs** (for manual mode) | Array of player URLs | `[]` |
-| `time_periods` | Time periods to crawl (for auto mode) | `"4w"`, `"1w"`, `"3d"`, `"1d"` | `["4w", "1w", "3d"]` |
-| `ranks` | Rank tiers to target (for auto mode) | `"Throne"`, `"Jade"`, `"Gold"`, `"Throne East"`, `"Jade East"`, `"Gold East"`, `"All"` | `["Gold"]` |
-| `max_players_per_period` | Players per time period | 1-50 | `20` |
-| `paipu_limit` | Game logs per player | Any positive integer | `9999` |
-| `output_filename` | Output file name | Any filename | `"tonpuulist.txt"` |
-| `headless_mode` | Run browser in background | `true`, `false` | `true` |
+| `crawler_mode` | Crawler mode | `"auto"`, `"manual"`, `"date_room"` | `"auto"` |
+| `manual_player_urls` | Manual player URL list | URL array | `[]` |
+| `time_periods` | Time periods (auto mode) | `"4w"`, `"1w"`, `"3d"`, `"1d"` | `["4w", "1w", "3d"]` |
+| `ranks` | Ranks (auto mode) | `"Throne"`, `"Jade"`, `"Gold"`, `"Throne East"`, `"Jade East"`, `"Gold East"`, `"All"` | `["Gold"]` |
+| `max_players_per_period` | Players per period | 1-50 | `20` |
+| `paipu_limit` | Logs per player | Any positive integer | `9999` |
+| `output_filename` | Output filename | Any filename | `"tonpuulist.txt"` |
+| `headless_mode` | Headless mode (background) | `true`, `false` | `true` |
 | `save_screenshots` | Save verification screenshots | `true`, `false` | `true` |
+| `start_date` | Start date (date_room mode) | `"YYYY-MM-DD"` | - |
+| `end_date` | End date (date_room mode) | `"YYYY-MM-DD"` | - |
+| `target_room` | Target room (date_room mode) | `"Throne"`, `"Jade"`, `"Gold"`, etc. | - |
+| `fast_mode` | Fast mode (date_room mode) | `true`, `false` | `false` |
 
-**Common Configuration Examples:**
+### Mahjong Soul Account Configuration
 
-<details>
-<summary>📋 Click to expand configuration examples</summary>
+Edit `config.env` file:
 
-**Quick Test Configuration (Auto Mode):**
-```json
-{
-  "crawler_mode": "auto",
-  "time_periods": ["3d"],
-  "ranks": ["Gold"],
-  "max_players_per_period": 5,
-  "paipu_limit": 100,
-  "output_filename": "test_paipu.txt",
-  "headless_mode": false,
-  "save_screenshots": true
-}
-```
-
-**Throne-Only Configuration (Auto Mode):**
-```json
-{
-  "crawler_mode": "auto",
-  "time_periods": ["1w", "3d"],
-  "ranks": ["Throne"],
-  "max_players_per_period": 15,
-  "paipu_limit": 9999,
-  "output_filename": "throne_paipu.txt",
-  "headless_mode": true,
-  "save_screenshots": false
-}
-```
-
-**Complete Dataset Collection (Auto Mode):**
-```json
-{
-  "crawler_mode": "auto",
-  "time_periods": ["4w", "1w", "3d", "1d"],
-  "ranks": ["All"],
-  "max_players_per_period": 30,
-  "paipu_limit": 9999,
-  "output_filename": "complete_dataset.txt",
-  "headless_mode": true,
-  "save_screenshots": true
-}
-```
-
-**Manual Player Selection (Manual Mode - Legacy Compatible):**
-```json
-{
-  "crawler_mode": "manual",
-  "manual_player_urls": [
-    "https://amae-koromo.sapk.ch/player/123456789/12",
-    "https://amae-koromo.sapk.ch/player/987654321/12",
-    "https://amae-koromo.sapk.ch/player/555666777/12"
-  ],
-  "paipu_limit": 9999,
-  "output_filename": "manual_selection.txt",
-  "headless_mode": true,
-  "save_screenshots": false
-}
-```
-
-**East Room Focused (Auto Mode):**
-```json
-{
-  "crawler_mode": "auto",
-  "time_periods": ["1w"],
-  "ranks": ["Throne East", "Jade East", "Gold East"],
-  "max_players_per_period": 20,
-  "paipu_limit": 9999,
-  "output_filename": "east_paipu.txt",
-  "headless_mode": true,
-  "save_screenshots": false
-}
-```
-
-</details>
-
-#### **2.2 Set Mahjong Soul Credentials**
-**File Path:** `config.env`
 ```env
-# 雀魂認證設定
+# Mahjong Soul authentication
 ms_username=your_email@example.com
 ms_password=your_password
 
-# 思考時間收集設定（可選）
-# 設為 true 啟用，false 停用（默認：true）
-# 啟用後會在 mjai 格式中添加 think_ms 字段，記錄玩家每個動作的思考時間（毫秒）
+# Thinking time collection (optional)
+# true: enable thinking time collection, false: disable (default: true)
 COLLECT_TIMING=true
 ```
 
-**Configuration Parameters:**
-- `ms_username`: Your Mahjong Soul account email
-- `ms_password`: Your Mahjong Soul account password
-- `COLLECT_TIMING`: Enable/disable thinking time collection (default: `true`)
-  - `true`: Inject `think_ms` field into MJAI format with millisecond-precision thinking time
-  - `false`: Standard MJAI format without thinking time data
+**Parameter Description:**
+- `ms_username`: Mahjong Soul account email
+- `ms_password`: Mahjong Soul account password
+- `COLLECT_TIMING`: Whether to collect thinking time data
+  - `true`: Add `think_ms` field in MJAI format (milliseconds)
+  - `false`: Standard MJAI format without thinking time
 
-Note: You need a CN server account with username/password login support.
+## Usage
 
-### **Step 3: Collect Game IDs**
+### 1. Collect Game IDs
 
-Navigate to the paipu_project directory and run:
 ```bash
 cd paipu_project
 scrapy crawl paipu_spider
 ```
 
-The crawler will automatically detect your configuration mode:
-
-**🚀 Auto Mode Output:**
-```
-🚀 使用自動化配置模式...
-配置摘要:
-  時間段: 四週, 一週, 三天
-  段位: 金
-  每個時間段最多玩家數: 20
-```
-- ✅ Automatically visit [MajSoul Stats Rankings](https://amae-koromo.sapk.ch/ranking/delta)
-- ⚙️ Apply your configuration settings (time periods, ranks)
-- 📊 Collect from Positive ranking leaderboards
-- 💾 Save game IDs to your configured output file
-- 📸 Optionally save verification screenshots
-
-**🔧 Manual Mode Output:**
-```
-🔧 使用 Manual 模式（Legacy相容）...
-從配置檔案中讀取 3 個手動設定的玩家URLs
-已載入 3 個有效的玩家URLs
-```
-- ✅ Use your manually specified player URLs
-- 🎯 Collect game logs from specific players
-- 💾 Save game IDs to your configured output file
-
-**Output:** Game IDs saved to `tonpuulist.txt` (or your configured filename)
-
-Example output in `tonpuulist.txt`:
+Output file (e.g., `tonpuulist.txt`) format:
 ```
 241103-057ea444-a219-4202-930e-2d2472f4d6e600
 241104-12345678-abcd-efgh-ijkl-mnopqrstuvwx00
 ```
 
-### **Step 4: Process Game Logs**
-1. Move `tonpuulist.txt` to the root directory
-2. Run **`toumajsoul.py`**
+### 2. Download and Convert Logs
 
-Game logs will be saved in the `mahjong_logs` directory with the following structure:
+```bash
+cd ..
+python toumajsoul.py
+```
+
+Logs saved in `mahjong_logs` directory:
 ```
 mahjong_logs/
-├── mjai/           # MJAI format (with think_ms if enabled)
+├── mjai/           # MJAI format (with think_ms)
 │   └── *.json.gz
 └── tenhou/         # Tenhou.net/6 format
     └── *.json
 ```
 
-#### **⏱️ Thinking Time Feature**
+### 3. Validate Logs
 
-When `COLLECT_TIMING=true` (default), the MJAI format will include `think_ms` field:
+```bash
+validate_logs.exe mahjong_logs/mjai
+```
 
-**Standard MJAI output:**
+## Thinking Time Data
+
+When `COLLECT_TIMING=true`, MJAI output includes `think_ms` field:
+
+**Standard output:**
 ```json
 {"type": "dahai", "actor": 0, "pai": "W", "tsumogiri": false}
 ```
 
-**With thinking time enabled:**
+**With thinking time:**
 ```json
 {"type": "dahai", "actor": 0, "pai": "W", "think_ms": 2864, "tsumogiri": false}
 ```
 
-**Thinking Time Data:**
+**Data Description:**
 - `think_ms`: Milliseconds from receiving tile to making action
-- Calculated from Mahjong Soul's `passed` timestamp (real game time)
 - Includes all player actions: discard, chi, pon, kan, riichi
 - Typical values:
-  - Quick discard (tsumogiri): 1000-3000 ms
-  - Thoughtful discard: 2000-15000 ms  
-  - Calling tiles (chi/pon): 500-5000 ms
+  - Quick discard: 1000-3000 ms
+  - Thoughtful discard: 2000-15000 ms
+  - Calls: 500-5000 ms
 
-**Analysis Example:**
-```python
-import json, gzip
-
-with gzip.open('mahjong_logs/mjai/xxx.json.gz', 'rt') as f:
-    for line in f:
-        event = json.loads(line)
-        if 'think_ms' in event:
-            print(f"Player {event['actor']}: {event['think_ms']}ms")
-```
-
-### **Step 5: Validate Logs**
-```bash
-validate_logs.exe tonpuulog
-```
-
-## 📁 Project Structure
-```
-MajsoulPaipuConvert/
-├── README.md
-├── requirements.txt
-├── config.env                       # Authentication & feature settings
-├── toumajsoul.py                    # Game log downloader with timing support
-├── crawler_config.json              # Crawler configuration
-├── tonpuulist.txt                   # Generated game IDs
-├── paipu_project/                   # Scrapy crawler project
-│   ├── scrapy.cfg
-│   └── paipu_project/
-│       ├── crawler_config.json      # Alternative config location
-│       └── spiders/
-│           └── PaipuSpider.py       # Main crawler
-├── mahjong_logs/                    # Downloaded game logs (new structure)
-│   ├── mjai/                        # MJAI format with think_ms
-│   │   └── *.json.gz
-│   └── tenhou/                      # Tenhou.net/6 format
-│       └── *.json
-└── tensoul-py-ng/                   # Mahjong Soul log downloader
-    └── tensoul/
-```
-
-## 🔍 Verification and Debugging
-
-The crawler provides several verification methods:
-
-1. **Screenshots** (if enabled): Verify rank selection and time period targeting
-2. **Console Output**: Detailed logging of collection progress
-3. **File Output**: Check collected game IDs in your output file
-
-If you encounter issues:
-- Set `headless_mode: false` to see browser actions
-- Enable `save_screenshots: true` for visual verification
-- Check ChromeDriver compatibility with your Chrome version
-
-## 🚀 Quick Start Commands
+## Quick Start
 
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt
 pip install scrapy selenium
 
-# 2. Configure settings
-#    - Edit crawler_config.json (choose "auto" or "manual" mode)
-#    - Edit config.env (set credentials and COLLECT_TIMING option)
+# 2. Configure files
+#    - Edit crawler_config.json (choose mode)
+#    - Edit config.env (set account and COLLECT_TIMING)
 
-# 3. Collect game IDs (unified command for both modes)
+# 3. Collect game IDs
 cd paipu_project
 scrapy crawl paipu_spider
 
-# 4. Download game logs (with thinking time collection)
+# 4. Download logs
 cd ..
 python toumajsoul.py
 
@@ -409,83 +219,26 @@ python toumajsoul.py
 validate_logs.exe mahjong_logs/mjai
 ```
 
-**Thinking Time Collection Control:**
-```bash
-# Enable thinking time collection (default)
-COLLECT_TIMING=true
+## Troubleshooting
 
-# Disable thinking time collection
-COLLECT_TIMING=false
-```
+**ChromeDriver error:** Ensure ChromeDriver version matches Chrome browser
 
-## 🔄 Switching Between Modes
+**Empty results:** Check network connection and configuration settings
 
-**To switch from Auto to Manual mode:**
-```json
-{
-  "crawler_mode": "manual",  // Changed from "auto"
-  "manual_player_urls": [    // Add your specific player URLs
-    "https://amae-koromo.sapk.ch/player/123456789/12",
-    "https://amae-koromo.sapk.ch/player/987654321/12"
-  ],
-  "time_periods": [],        // Leave empty for manual mode
-  "ranks": []                // Leave empty for manual mode
-}
-```
+**No think_ms field:** Verify `COLLECT_TIMING=true` in `config.env`
 
-**To switch from Manual to Auto mode:**
-```json
-{
-  "crawler_mode": "auto",    // Changed from "manual"
-  "manual_player_urls": [],  // Leave empty for auto mode
-  "time_periods": ["1w"],    // Set your desired time periods
-  "ranks": ["Gold"]          // Set your desired ranks
-}
-```
-
-No code changes required - just edit the configuration file and run the same command!
-
-## ⚠️ Troubleshooting
-
-**Common Issues:**
-- **ChromeDriver error**: Ensure ChromeDriver version matches Chrome browser
-- **Empty results**: Check network connection and verify configuration mode/settings
-- **Process hanging**: For auto mode, verify network access to rankings site; for manual mode, check player URLs format
-- **Rate limiting**: Adjust `max_players_per_period` if experiencing timeouts
-- **Configuration errors**: The program will validate and show specific error messages for invalid configurations
-
-**Thinking Time Issues:**
-- **No think_ms in output**: Verify `COLLECT_TIMING=true` in `config.env`
-- **think_ms values seem wrong**: 
-  - Values are calculated from Mahjong Soul's server timestamps (`passed` field)
-  - Include small network latency (usually < 100ms)
-  - Opening moves may show time from deal completion to first action
-- **Missing think_ms for some actions**: Only player actions (dahai, chi, pon, kan, riichi) include thinking time
-- **Abnormally long think_ms**: May indicate AFK or disconnection (values > 120000ms = 2 minutes)
+**Configuration errors:** Program will validate and display error messages
 
 ## License
-This project incorporates code from:
-- [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) under the Apache-2.0 license
-- [tensoul-py-ng](https://github.com/unStatiK/tensoul-py-ng) for Mahjong Soul log downloading
 
-**Important**: This project uses third-party libraries and tools. Please ensure compliance with their respective licenses:
-- mjai-reviewer: Apache-2.0 License (see [LICENSE](https://github.com/Equim-chan/mjai-reviewer/blob/main/LICENSE))
-- tensoul-py-ng: MIT License (see [LICENSE](https://github.com/unStatiK/tensoul-py-ng/blob/master/LICENSE))
+This project uses the following open source components:
+- [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) - Apache-2.0 License
+- [tensoul-py-ng](https://github.com/unStatiK/tensoul-py-ng) - MIT License
 
 ## Acknowledgments
-- [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) - Game log analysis tool
-- [tensoul-py-ng](https://github.com/unStatiK/tensoul-py-ng) - Mahjong Soul log downloading in tenhou.net/6 format
+
+- [mjai-reviewer](https://github.com/Equim-chan/mjai-reviewer) - Log analysis tool
+- [tensoul-py-ng](https://github.com/unStatiK/tensoul-py-ng) - Mahjong Soul log downloader
 - [MajSoul Stats](https://amae-koromo.sapk.ch/) - Data source
 - [Scrapy](https://scrapy.org/) - Web scraping framework
 - [Selenium](https://selenium.dev/) - Browser automation
-- [Mortal](https://github.com/Equim-chan/Mortal) - AI Engine
-
-## Contributing
-Issues and pull requests are welcome. Please ensure proper attribution and licensing compliance when contributing.
-
----
-<div align="center">
-Created with ❤️ for the Mahjong community
-
-</div>
-
