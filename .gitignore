@@ -21,6 +21,7 @@ __pycache__/
 # 環境相關
 venv/
 env/
+config.env
 
 # 第三方庫
 tensoul-py-ng/
