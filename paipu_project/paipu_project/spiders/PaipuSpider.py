@@ -17,6 +17,7 @@ import tempfile
 import shutil
 import signal
 import atexit
+import random
 
 @dataclass
 class CrawlerConfig:
@@ -802,12 +803,18 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
                         player_counts[url] += 1
                         print(f"Wrote new paipu ({url}):", paipu_id)
                         new_paipu_found = True
+                        
+                        # 添加小延迟，避免处理过快 (0.05-0.15秒)
+                        time.sleep(random.uniform(0.05, 0.15))
             
             # 檢查是否已經滾動到底部
             if driver.execute_script("return window.innerHeight + window.scrollY + 10 >= document.body.offsetHeight"):
                 break
             
             driver.execute_script("window.scrollBy(0, 500);")
+            
+            # 添加滚动延迟，避免滚动过快 (0.3-0.8秒)
+            time.sleep(random.uniform(0.3, 0.8))
                 
 
 

@@ -11,6 +11,7 @@ import hashlib
 import tempfile
 import os
 import shutil
+import random
 
 ROOM_RANK_MAPPING = {
     16: "Throne",
@@ -31,6 +32,12 @@ RANK_ROOM_MAPPING = {
 }
 
 SLEEP_TIME = 0  # Speed up
+
+# API请求延迟配置（秒）- 用于避免请求过快被拦截
+API_REQUEST_DELAY_MIN = 0.5  # 最小延迟
+API_REQUEST_DELAY_MAX = 1.5  # 最大延迟
+CLICK_DELAY_MIN = 0.1        # 点击最小延迟
+CLICK_DELAY_MAX = 0.3        # 点击最大延迟
 
 class OptimizedPaipuExtractor:
     
@@ -362,11 +369,21 @@ class OptimizedPaipuExtractor:
     
     def extract_paipu_via_redirect(self, encrypted_api_url):
         try:
+            # 添加随机延迟，避免请求过快被拦截
+            time.sleep(random.uniform(API_REQUEST_DELAY_MIN, API_REQUEST_DELAY_MAX))
+            
             session = requests.Session()
             session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
             })
-            response = session.get(encrypted_api_url, allow_redirects=True, timeout=2)  # 加快：10秒 → 2秒
+            
+            response = session.get(encrypted_api_url, allow_redirects=True, timeout=5)
+            
             if response.status_code == 200:
                 final_url = response.url
                 paipu_match = re.search(r'paipu=([^&]+)', final_url)
@@ -456,6 +473,9 @@ class OptimizedPaipuExtractor:
             session_id = game_record.get('session_id') or self.create_game_session_id(
                 players, start_time, end_time, room_info['room_number']
             )
+            
+            # 添加小延迟，避免点击过快
+            time.sleep(random.uniform(CLICK_DELAY_MIN, CLICK_DELAY_MAX))
             
             # 直接點擊，不滾動（已經在可見範圍內）
             try:
