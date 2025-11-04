@@ -574,6 +574,10 @@ def get_top_players_urls(config: CrawlerConfig):
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
         
+        # 等待頁面實際內容載入
+        print("等待排行榜頁面載入...")
+        time.sleep(2)  # 給予額外時間讓動態內容載入
+        
         # Build rank display string
         rank_display = ", ".join([get_rank_display_name(rank) for rank in config.ranks])
         period_display = ", ".join([get_period_display_name(period) for period in config.time_periods])
@@ -782,9 +786,24 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
     try:
         driver.get(url)
 
-        WebDriverWait(driver, 10).until(
+        # 等待頁面 body 載入
+        WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
+        
+        # 等待至少一個 paipu 連結出現(最多等待 20 秒)
+        print(f"等待頁面動態內容載入...")
+        try:
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='paipu=']"))
+            )
+            print(f"頁面載入完成,開始收集 paipu 連結...")
+        except Exception as e:
+            print(f"等待 paipu 連結超時: {e}")
+            print(f"嘗試繼續...")
+        
+        # 額外等待一秒,確保更多內容載入
+        time.sleep(1)
 
         while True:
             paipu_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='paipu=']")
