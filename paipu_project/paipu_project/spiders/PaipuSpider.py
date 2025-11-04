@@ -334,7 +334,7 @@ if __name__ == "__main__":
         except:
             pass
 
-def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
+def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List[str]:
     """Collect paipus using date_room mode"""
     all_paipus = []
     interrupted = False
@@ -405,6 +405,11 @@ def collect_paipus_by_date_room(config: CrawlerConfig) -> List[str]:
                 if paipu not in all_paipus:
                     all_paipus.append(paipu)
                     new_paipus += 1
+                    
+                    # 即時寫入到文件
+                    if output_file:
+                        output_file.write(paipu + "\n")
+                        output_file.flush()  # 強制刷新緩衝區，確保立即寫入磁碟
             
             day_elapsed = time.time() - day_start
             total_elapsed = time.time() - start_time
@@ -741,7 +746,7 @@ def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
     
     return player_urls
 
-def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfig):
+def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfig, output_file=None):
     """Process paipu fetching for a single player"""
     chrome_options = Options()
     
@@ -821,6 +826,12 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
                         processed_paipu_ids.append(paipu_id)
                         player_counts[url] += 1
                         print(f"Wrote new paipu ({url}):", paipu_id)
+                        
+                        # 即時寫入到文件
+                        if output_file:
+                            output_file.write(paipu_id + "\n")
+                            output_file.flush()  # 強制刷新緩衝區，確保立即寫入磁碟
+                        
                         new_paipu_found = True
                         
                         # 添加小延迟，避免处理过快 (0.05-0.15秒)
@@ -908,26 +919,28 @@ class PaipuSpider(scrapy.Spider):
         yield scrapy.Request(url="https://amae-koromo.sapk.ch", callback=self.start_crawling)
 
     def start_crawling(self, response):
-        if self.config.crawler_mode == "date_room":
-            # date_room mode: Directly call collection function
-            date_room_paipus = collect_paipus_by_date_room(self.config)
-            
-            # Add to processed_paipu_ids (avoid duplicates)
-            for paipu_id in date_room_paipus:
-                if paipu_id not in self.processed_paipu_ids:
-                    self.processed_paipu_ids.append(paipu_id)
-            
-            # End directly
-            self.spider_closed(None)
-            
-        else:
-            # Original auto and manual mode processing
-            print(f"Starting to process {len(self.player_urls)} players...")
-            
-            for url in self.player_urls:
-                process_player(url, self.processed_paipu_ids, self.player_counts, self.config)
+        # 以追加模式打開文件，用於即時寫入
+        with open(self.config.output_filename, "a", encoding='utf-8') as output_file:
+            if self.config.crawler_mode == "date_room":
+                # date_room mode: Directly call collection function
+                date_room_paipus = collect_paipus_by_date_room(self.config, output_file)
+                
+                # Add to processed_paipu_ids (avoid duplicates)
+                for paipu_id in date_room_paipus:
+                    if paipu_id not in self.processed_paipu_ids:
+                        self.processed_paipu_ids.append(paipu_id)
+                
+                # End directly
+                self.spider_closed(None)
+                
+            else:
+                # Original auto and manual mode processing
+                print(f"Starting to process {len(self.player_urls)} players...")
+                
+                for url in self.player_urls:
+                    process_player(url, self.processed_paipu_ids, self.player_counts, self.config, output_file)
 
-            self.spider_closed(None)
+                self.spider_closed(None)
 
     def spider_closed(self, reason):
         print(f"Total collected {len(self.processed_paipu_ids)} unique paipu IDs")
@@ -965,8 +978,8 @@ class PaipuSpider(scrapy.Spider):
                 rank_suffix = "_".join(self.config.ranks).lower()
                 print(f"  - screenshot_{period}_positive_ranking_{rank_suffix}.png ({get_period_display_name(period)})")
 
-        print("Saving data...")
-        self.write_to_file()
+        print(f"\n所有數據已即時寫入到文件: {self.config.output_filename}")
+        print(f"爬蟲執行完成！")
 
     def write_to_file(self):
         with open(self.config.output_filename, "w", encoding='utf-8') as file:
