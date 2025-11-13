@@ -25,3 +25,6 @@ config.env
 
 # 第三方庫
 tensoul-py-ng/
+
+# Augment AI
+.augment/
