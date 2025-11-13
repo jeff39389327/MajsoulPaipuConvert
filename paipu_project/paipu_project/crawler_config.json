@@ -1,9 +1,9 @@
 {
   "crawler_mode": "date_room",
-  "start_date": "2019-08-24",
-  "end_date": "2019-08-24", 
-  "target_room": "Throne",
+  "start_date": "2024-01-01",
+  "end_date": "2025-11-13",
+  "target_room": "Jade",
   "output_filename": "date_room_list.txt",
-  "fast_mode": true,
-  "headless_mode": true
+  "headless_mode": true,
+  "fast_mode": false
 }

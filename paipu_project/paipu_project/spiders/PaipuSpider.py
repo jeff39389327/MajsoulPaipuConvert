@@ -240,7 +240,7 @@ def get_period_display_name(period: str) -> str:
     }
     return period_mapping.get(period, period)
 
-def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False) -> List[str]:
+def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False, output_file=None) -> List[str]:
     """
     Execute date_room_extractor.py and get the output paipu ID list
     
@@ -300,31 +300,53 @@ if __name__ == "__main__":
         temp_file_path = temp_file.name
     
     try:
-        # Execute temporary script
-        # Use errors='ignore' to ignore encoding errors (Chrome logs may contain non-UTF-8 characters)
-        result = subprocess.run(
-            [sys.executable, temp_file_path],
-            capture_output=True,
+        # Execute temporary script with real-time output
+        # Use Popen to allow real-time output display
+        # Set environment to force UTF-8 encoding
+        env = os.environ.copy()
+        env['PYTHONIOENCODING'] = 'utf-8'
+
+        process = subprocess.Popen(
+            [sys.executable, '-u', temp_file_path],  # -u for unbuffered output
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Merge stderr to stdout for unified output
             text=True,
             encoding='utf-8',
-            errors='ignore'  # Ignore characters that cannot be decoded
+            errors='replace',  # Replace invalid characters with ?
+            bufsize=1,  # Line buffered
+            universal_newlines=True,
+            env=env
         )
-        
-        if result.returncode != 0:
-            # Safely handle error output
-            stderr_output = result.stderr if result.stderr else "Unknown error"
-            print(f"Error executing date_room_extractor.py: {stderr_output}")
-            return []
-        
-        # Parse output, one paipu ID per line
+
+        # Collect paipu IDs while displaying real-time output
         paipu_ids = []
-        if result.stdout:
-            for line in result.stdout.strip().split('\n'):
-                line = line.strip()
-                # Filter out non-paipu ID output (such as print debug messages)
-                if line and re.match(r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', line):
-                    paipu_ids.append(line)
-        
+        for line in process.stdout:
+            line = line.rstrip()
+            if line:
+                # 註解掉 extractor 的輸出，只保留 Spider 的輸出
+                # try:
+                #     print(f"  [extractor] {line}", flush=True)
+                # except UnicodeEncodeError:
+                #     print(f"  [extractor] {line.encode('utf-8', errors='replace').decode('utf-8')}", flush=True)
+
+                # Check if this line is a paipu ID
+                if re.match(r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', line.strip()):
+                    paipu_id = line.strip()
+                    paipu_ids.append(paipu_id)
+
+                    # 即時寫入到檔案
+                    if output_file:
+                        output_file.write(paipu_id + "\n")
+                        output_file.flush()
+                        print(f"[Spider] 即時寫入牌譜: {paipu_id}", flush=True)
+
+        # Wait for process to complete
+        return_code = process.wait()
+
+        if return_code != 0:
+            print(f"Error: date_room_extractor.py exited with code {return_code}")
+            return []
+
         return paipu_ids
         
     finally:
@@ -386,7 +408,8 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
                     target_date=date_str,
                     target_room=config.target_room,
                     headless_mode=config.headless_mode,
-                    fast_mode=config.fast_mode
+                    fast_mode=config.fast_mode,
+                    output_file=output_file  # 傳遞 output_file 以實現即時寫入
                 )
             except Exception as e:
                 print(f"Error processing {date_str}: {e}")
@@ -400,16 +423,12 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
                 break
             
             # Add to total list (date_room_extractor.py already deduplicates, but ensure cross-date deduplication here)
+            # 注意：牌譜已在 execute_date_room_extractor_py 中即時寫入，這裡只做去重統計
             new_paipus = 0
             for paipu in day_results:
                 if paipu not in all_paipus:
                     all_paipus.append(paipu)
                     new_paipus += 1
-                    
-                    # 即時寫入到文件
-                    if output_file:
-                        output_file.write(paipu + "\n")
-                        output_file.flush()  # 強制刷新緩衝區，確保立即寫入磁碟
             
             day_elapsed = time.time() - day_start
             total_elapsed = time.time() - start_time

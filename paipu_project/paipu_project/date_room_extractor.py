@@ -12,6 +12,16 @@ import tempfile
 import os
 import shutil
 import random
+import sys
+import io
+
+from datetime import datetime
+
+# 強制設定 stdout 和 stderr 為 UTF-8 編碼
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 ROOM_RANK_MAPPING = {
     16: "Throne",
@@ -40,7 +50,7 @@ CLICK_DELAY_MIN = 0.1        # 点击最小延迟
 CLICK_DELAY_MAX = 0.3        # 点击最大延迟
 
 class OptimizedPaipuExtractor:
-    
+
     def __init__(self, headless=True, fast_mode=False):
         """
         Args:
@@ -55,27 +65,27 @@ class OptimizedPaipuExtractor:
         self.temp_user_data_dir = None
         self.setup_driver()
 
-    
+
     def setup_driver(self):
         chrome_options = Options()
-        
+
         # Basic headless mode setup
         if self.headless:
             chrome_options.add_argument("--headless=new")
-        
+
         # Core fix: Do not use user-data-dir, use other isolation methods
-        
+
         # Use random port to avoid debug port conflicts
         import random
         remote_port = random.randint(9222, 65535)
         chrome_options.add_argument(f"--remote-debugging-port={remote_port}")
-        
+
         # Core stability parameters
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-software-rasterizer")
-        
+
         # Disable various features that may cause conflicts
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-background-networking")
@@ -86,7 +96,7 @@ class OptimizedPaipuExtractor:
         chrome_options.add_argument("--disable-features=TranslateUI,BlinkGenPropertyTrees")
         chrome_options.add_argument("--disable-ipc-flooding-protection")
         chrome_options.add_argument("--disable-renderer-backgrounding")
-        
+
         # Browser behavior settings
         chrome_options.add_argument("--no-first-run")
         chrome_options.add_argument("--no-default-browser-check")
@@ -98,34 +108,45 @@ class OptimizedPaipuExtractor:
         chrome_options.add_argument("--window-size=1920,3000")
         # Force device scale factor
         chrome_options.add_argument("--force-device-scale-factor=1")
-        
+
         # Prevent detection as automation tool
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        
+
+        # 額外反檢測參數（針對 Cloudflare/Vercel）
+        prefs = {
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+            "profile.default_content_setting_values.notifications": 2,
+            "webrtc.ip_handling_policy": "disable_non_proxied_udp",
+            "webrtc.multiple_routes_enabled": False,
+            "webrtc.nonproxied_udp_enabled": False
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         # Performance optimization
         chrome_options.add_argument("--disable-web-security")
         chrome_options.add_argument("--allow-running-insecure-content")
         chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
-        
+
         # Log settings - strongly suppress all logs
         chrome_options.add_argument("--log-level=3")
         chrome_options.add_argument("--silent")
         chrome_options.add_argument("--disable-logging")
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        
+
         # Set environment variables to suppress Chrome logs
         import os as os_module
         os_module.environ['WDM_LOG_LEVEL'] = '0'
         os_module.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-        
-        # Set User-Agent
-        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
+
+        # Set User-Agent（更新至最新版本）
+        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
         try:
             self.driver = webdriver.Chrome(options=chrome_options)
-            
+
             # Set viewport size for headless mode (critical for virtual scrolling)
             if self.headless:
                 self.driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
@@ -134,57 +155,65 @@ class OptimizedPaipuExtractor:
                     'deviceScaleFactor': 1,
                     'mobile': False
                 })
-            
+
             # Enhanced anti-detection: Modify more browser features
             self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                "platform": "Win32"
             })
-            
-            # Hide webdriver features
-            self.driver.execute_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                
-                // Modify plugins
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                
-                // Modify languages
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['zh-TW', 'zh', 'en-US', 'en']
-                });
-                
-                // Modify platform
-                Object.defineProperty(navigator, 'platform', {
-                    get: () => 'Win32'
-                });
-                
-                // Modify hardwareConcurrency
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => 8
-                });
-                
-                // Modify deviceMemory
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => 8
-                });
-                
-                // Modify Chrome object
-                window.chrome = {
-                    runtime: {}
-                };
-                
-                // Modify permissions
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-            """)
-            
+
+            # 繞過 Cloudflare/Vercel 檢測：注入更完整的 navigator 與 window 屬性
+            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': '''
+                    delete Object.getPrototypeOf(navigator).webdriver;
+
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+                    Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+                    Object.defineProperty(navigator, 'appVersion', {get: () => '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['zh-TW', 'zh', 'en-US', 'en']});
+                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+                    window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}};
+
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({ state: Notification.permission }) :
+                            originalQuery(parameters)
+                    );
+
+                    if (navigator.connection) {
+                        Object.defineProperty(navigator.connection, 'rtt', {get: () => 50});
+                    }
+
+                    const getParameter = WebGLRenderingContext.prototype.getParameter;
+                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                        if (parameter === 37445) return 'Intel Inc.';
+                        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                        return getParameter.apply(this, [parameter]);
+                    };
+
+                    ['height', 'width'].forEach(property => {
+                        const imageDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, property);
+                        Object.defineProperty(HTMLImageElement.prototype, property, {
+                            ...imageDescriptor,
+                            get: function() {
+                                if (this.complete && this.naturalHeight == 0) {
+                                    return 20;
+                                }
+                                return imageDescriptor.get.apply(this);
+                            },
+                        });
+                    });
+                '''
+            })
+
+
+
             import sys
             print(f"Chrome driver started successfully (debug port: {remote_port})", file=sys.stderr)
             print(f"Anti-detection measures applied", file=sys.stderr)
@@ -194,20 +223,78 @@ class OptimizedPaipuExtractor:
             import traceback
             traceback.print_exc()
             raise
-    
+
     def is_valid_paipu_id(self, value):
         if not isinstance(value, str) or len(value) < 20:
             return False
         paipu_pattern = r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         return bool(re.match(paipu_pattern, value))
-    
+
     def clean_paipu_id(self, raw_paipu_id):
         if not raw_paipu_id:
             return None
         if '_a' in raw_paipu_id:
             return raw_paipu_id.split('_a')[0]
         return raw_paipu_id
-    
+
+
+    def get_time_candidates(self, start_time):
+        s = str(start_time).strip()
+        candidates = set()
+        # HH:MM
+        m = re.search(r'(\d{1,2}:\d{1,2})', s)
+        if m:
+            hhmm = m.group(1)
+            candidates.add(hhmm)
+        # YYYY/M/D 或 YYYY-M-D
+        dm = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', s)
+        if dm and m:
+            y, mo, d = dm.groups()
+            hhmm = m.group(1)
+            candidates.add(f"{y}/{int(mo)}/{int(d)} {hhmm}")
+            candidates.add(f"{y}-{int(mo):02d}-{int(d):02d} {hhmm}")
+        # 原字串也當作候選
+        candidates.add(s)
+        return [c for c in candidates if c]
+
+
+    def _parse_date_loose(self, s):
+        m = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', str(s))
+        if not m:
+            return None
+        y, mo, d = map(int, m.groups())
+        return (y, mo, d)
+
+    def _parse_time_loose(self, s):
+        m = re.search(r'(\d{1,2}):(\d{1,2})', str(s))  # 支援 23:5 與 23:05
+        if not m:
+            return None
+        hh, mm = map(int, m.groups())
+        return (hh, mm)
+
+    def _extract_dt_loose(self, text, fallback_date_str):
+        date_tuple = self._parse_date_loose(text)
+        if not date_tuple:
+            date_tuple = self._parse_date_loose(fallback_date_str)
+        time_tuple = self._parse_time_loose(text)
+        if not (date_tuple and time_tuple):
+            return None
+        y, mo, d = date_tuple
+        hh, mm = time_tuple
+        try:
+            return datetime(y, mo, d, hh, mm)
+        except Exception:
+            return None
+
+    def is_time_close(self, target_time_str, row_text, room_date_str, tolerance_minutes=15):
+        target_dt = self._extract_dt_loose(target_time_str, room_date_str)
+        row_dt = self._extract_dt_loose(row_text, room_date_str)
+        if not (target_dt and row_dt):
+            return False
+        diff = abs((row_dt - target_dt).total_seconds()) / 60.0
+        return diff <= tolerance_minutes
+
+
     def get_room_urls_by_ranks(self, target_date, target_ranks):
         room_urls = []
         for rank in target_ranks:
@@ -221,7 +308,7 @@ class OptimizedPaipuExtractor:
                     'date': target_date
                 })
         return room_urls
-    
+
     def wait_for_table_load(self, max_wait=20):
         import sys
         try:
@@ -234,7 +321,7 @@ class OptimizedPaipuExtractor:
             # Critical for headless mode: Wait for JavaScript to fully initialize
             wait_time = 1.5 if self.fast_mode else 2
             time.sleep(wait_time)
-            
+
             # Force trigger initial render in headless mode
             if self.headless:
                 print(f"  Headless mode: Triggering initial content render...", file=sys.stderr)
@@ -247,17 +334,17 @@ class OptimizedPaipuExtractor:
                 self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
                 self.driver.execute_script("window.dispatchEvent(new Event('resize'));")
                 time.sleep(2)
-            
+
             # Check if there are game links
             game_links = self.driver.find_elements(By.XPATH, "//a[contains(@title, 'View game')]")
             print(f"  Found {len(game_links)} game links", file=sys.stderr)
-            
+
             if len(game_links) == 0:
                 print(f"  Warning: Table loaded but no game links found!", file=sys.stderr)
                 # Try other ways to check
                 all_links = self.driver.find_elements(By.TAG_NAME, "a")
                 print(f"  Page has a total of {len(all_links)} links", file=sys.stderr)
-                
+
                 # In headless mode, try more aggressive rendering
                 if self.headless:
                     print(f"  Headless mode: Attempting aggressive render trigger...", file=sys.stderr)
@@ -266,25 +353,25 @@ class OptimizedPaipuExtractor:
                         time.sleep(1)
                     self.driver.execute_script("window.scrollTo(0, 0);")
                     time.sleep(2)
-                    
+
                     game_links = self.driver.find_elements(By.XPATH, "//a[contains(@title, 'View game')]")
                     print(f"  After aggressive render: Found {len(game_links)} game links", file=sys.stderr)
                     if len(game_links) > 0:
                         return True
-                
+
                 return False
-            
+
             return True
         except Exception as e:
             print(f"  Error waiting for table to load: {e}", file=sys.stderr)
             return False
-    
+
     def create_game_session_id(self, players, start_time, end_time, room_number):
         player_names = [p.split(']')[1].strip() if ']' in p else p for p in players]
         session_data = f"{room_number}_{start_time}_{end_time}_{'-'.join(sorted(player_names))}"
         session_id = hashlib.md5(session_data.encode()).hexdigest()[:12]
         return session_id
-    
+
     def is_element_in_viewport(self, element):
         try:
             rect = self.driver.execute_script("""
@@ -300,7 +387,7 @@ class OptimizedPaipuExtractor:
             return rect['bottom'] > 0 and rect['top'] < viewport_height
         except:
             return False
-    
+
     def close_dialog(self):
         """Close the game details dialog"""
         try:
@@ -315,17 +402,17 @@ class OptimizedPaipuExtractor:
                 }));
             """)
             time.sleep(0.1)
-            
+
             # Method 2: Click backdrop (outside dialog)
             self.driver.execute_script("""
-                var backdrop = document.querySelector('div[class*="backdrop"]') || 
+                var backdrop = document.querySelector('div[class*="backdrop"]') ||
                               document.querySelector('[role="presentation"]');
                 if (backdrop) {
                     backdrop.click();
                 }
             """)
             time.sleep(0.1)
-            
+
             # Method 3: Click close button if exists
             self.driver.execute_script("""
                 var dialog = document.querySelector('div[role="dialog"]');
@@ -344,14 +431,14 @@ class OptimizedPaipuExtractor:
                 self.driver.back()
             except:
                 pass
-    
+
     def find_5data_url_in_page(self):
         try:
             # 優先檢查當前 URL
             current_url = self.driver.current_url
             if '5-data.amae-koromo.com' in current_url:
                 return current_url
-            
+
             # 使用 JavaScript 快速查找（比 Selenium 快得多）
             api_url = self.driver.execute_script("""
                 var links = document.querySelectorAll('a[href*="5-data.amae-koromo.com"]');
@@ -366,12 +453,16 @@ class OptimizedPaipuExtractor:
             return api_url
         except:
             return None
-    
+
     def extract_paipu_via_redirect(self, encrypted_api_url):
+        """
+        舊方法：通過 API 請求獲取牌譜 ID（已棄用，會觸發 API 限制）
+        保留此函數作為備用方案
+        """
         try:
             # 添加随机延迟，避免请求过快被拦截
             time.sleep(random.uniform(API_REQUEST_DELAY_MIN, API_REQUEST_DELAY_MAX))
-            
+
             session = requests.Session()
             session.headers.update({
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -381,9 +472,9 @@ class OptimizedPaipuExtractor:
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1'
             })
-            
+
             response = session.get(encrypted_api_url, allow_redirects=True, timeout=5)
-            
+
             if response.status_code == 200:
                 final_url = response.url
                 paipu_match = re.search(r'paipu=([^&]+)', final_url)
@@ -392,7 +483,7 @@ class OptimizedPaipuExtractor:
             return None
         except:
             return None
-    
+
     def get_first_unprocessed_game(self, processed_session_ids, room_number):
         try:
             # 使用 JavaScript 快速查找可見的行（比 Selenium 快得多）
@@ -400,11 +491,11 @@ class OptimizedPaipuExtractor:
                 var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
                 var viewportHeight = window.innerHeight;
                 var result = [];
-                
+
                 for (var i = 0; i < rows.length; i++) {
                     var row = rows[i];
                     var rect = row.getBoundingClientRect();
-                    
+
                     // 只處理可見的行
                     if (rect.bottom > 0 && rect.top < viewportHeight) {
                         var columns = row.querySelectorAll('.ReactVirtualized__Table__rowColumn');
@@ -412,17 +503,21 @@ class OptimizedPaipuExtractor:
                             var playerLinks = columns[1].querySelectorAll('a');
                             if (playerLinks.length > 0) {
                                 var players = [];
+                                var playerHrefs = [];
                                 for (var j = 0; j < playerLinks.length; j++) {
                                     var text = playerLinks[j].textContent.trim();
+                                    var href = playerLinks[j].href;
                                     if (text) players.push(text);
+                                    if (href) playerHrefs.push(href);
                                 }
-                                
+
                                 var startTime = columns[2].getAttribute('title') || columns[2].textContent.trim();
                                 var endTime = columns[3].getAttribute('title') || columns[3].textContent.trim();
-                                
-                                if (players.length > 0 && startTime && endTime) {
+
+                                if (players.length > 0 && startTime && endTime && playerHrefs.length > 0) {
                                     result.push({
                                         players: players,
+                                        playerHrefs: playerHrefs,
                                         startTime: startTime,
                                         endTime: endTime,
                                         firstLinkIndex: i
@@ -434,129 +529,503 @@ class OptimizedPaipuExtractor:
                 }
                 return result;
             """)
-            
+
             # 在 Python 端檢查哪個未處理
             for row_data in rows_data:
                 temp_session_id = self.create_game_session_id(
-                    row_data['players'], 
-                    row_data['startTime'], 
-                    row_data['endTime'], 
+                    row_data['players'],
+                    row_data['startTime'],
+                    row_data['endTime'],
                     room_number
                 )
-                
+
                 if temp_session_id not in processed_session_ids:
-                    # 獲取實際的鏈接元素
-                    link = self.driver.execute_script(f"""
-                        var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
-                        var columns = rows[{row_data['firstLinkIndex']}].querySelectorAll('.ReactVirtualized__Table__rowColumn');
-                        return columns[1].querySelector('a');
-                    """)
-                    
-                    if link:
-                        return {
-                            'players': row_data['players'],
-                            'start_time': row_data['startTime'],
-                            'end_time': row_data['endTime'],
-                            'first_link': link,
-                            'session_id': temp_session_id
-                        }
-            
+                    # 不保存元素引用，只保存索引和資料
+                    return {
+                        'players': row_data['players'],
+                        'player_hrefs': row_data['playerHrefs'],
+                        'start_time': row_data['startTime'],
+                        'end_time': row_data['endTime'],
+                        'first_link_index': row_data['firstLinkIndex'],
+                        'session_id': temp_session_id
+                    }
+
             return None
         except:
             return None
 
     def click_game_and_extract_paipu_safe(self, game_record, room_info):
+        """
+        新方法：通過訪問玩家頁面來獲取牌譜 ID，避免觸發 API 限制
+
+        流程：
+        1. 點擊玩家名稱 → 觸發彈窗
+        2. 在彈窗中點擊 "Player details" → 前往玩家頁面
+        3. 在玩家頁面用開始時間比對找到對應的牌譜 ID
+        4. 返回原頁面繼續處理
+        """
         try:
             players = game_record['players']
             start_time = game_record['start_time']
             end_time = game_record['end_time']
+            player_hrefs = game_record.get('player_hrefs', [])
             session_id = game_record.get('session_id') or self.create_game_session_id(
                 players, start_time, end_time, room_info['room_number']
             )
-            
+
+            if not player_hrefs:
+                return None, session_id
+
             # 添加小延迟，避免点击过快
             time.sleep(random.uniform(CLICK_DELAY_MIN, CLICK_DELAY_MAX))
-            
-            # 直接點擊，不滾動（已經在可見範圍內）
+
+            # 保存當前頁面 URL 和滾動位置（日期房間頁面）
+            original_url = self.driver.current_url
+            original_scroll_position = self.driver.execute_script("return window.pageYOffset;")
+
             try:
-                self.driver.execute_script("arguments[0].click();", game_record['first_link'])
-            except:
-                return None, session_id
-            
-            # Wait for dialog to appear with API URL
-            api_url = None
-            wait_start = time.time()
-            max_wait = 3.0  # Maximum 3 seconds wait
-            
-            while time.time() - wait_start < max_wait:
-                # Check if dialog with 5-data link appeared
-                api_url = self.driver.execute_script("""
-                    var dialog = document.querySelector('div[role="dialog"]');
-                    if (dialog) {
-                        var links = dialog.querySelectorAll('a[href*="5-data.amae-koromo.com"]');
-                        for (var i = 0; i < links.length; i++) {
-                            var href = links[i].href;
-                            if (href && href.indexOf('view_game') > -1) {
-                                return href;
+                import sys
+                print(f"\n{'='*60}", file=sys.stderr)
+                print(f"處理遊戲: {players[0] if players else 'Unknown'}", file=sys.stderr)
+                print(f"開始時間: {start_time}", file=sys.stderr)
+                print(f"{'='*60}", file=sys.stderr)
+
+                # 重新查找元素（避免 stale element reference）
+                print(f"[1] 重新查找並點擊玩家名稱...", file=sys.stderr)
+                first_link_index = game_record.get('first_link_index', 0)
+
+                # 除錯資訊：顯示當前狀態
+                debug_info = self.driver.execute_script(f"""
+                    var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
+                    return {{
+                        totalRows: rows.length,
+                        targetIndex: {first_link_index},
+                        scrollPosition: window.pageYOffset
+                    }};
+                """)
+                print(f"    除錯: 總行數={debug_info['totalRows']}, 目標索引={debug_info['targetIndex']}, 滾動位置={debug_info['scrollPosition']}", file=sys.stderr)
+
+                first_link = self.driver.execute_script(f"""
+                    var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
+                    if (rows.length > {first_link_index}) {{
+                        var columns = rows[{first_link_index}].querySelectorAll('.ReactVirtualized__Table__rowColumn');
+                        if (columns.length > 1) {{
+                            return columns[1].querySelector('a');
+                        }}
+                    }}
+                    return null;
+                """)
+
+                if not first_link:
+                    print(f"[X] 無法找到玩家連結（元素可能已被虛擬滾動回收）", file=sys.stderr)
+                    print(f"    提示: 索引 {first_link_index} 超出範圍或元素未渲染", file=sys.stderr)
+                    return None, session_id
+
+                # 點擊玩家名稱，觸發彈窗
+                print(f"[2] 點擊玩家名稱...", file=sys.stderr)
+                try:
+                    self.driver.execute_script("arguments[0].click();", first_link)
+                except Exception as e:
+                    print(f"[X] 點擊失敗: {str(e)}", file=sys.stderr)
+                    return None, session_id
+
+                # 等待彈窗出現
+                time.sleep(0.3)
+                print(f"[3] 等待彈窗出現...", file=sys.stderr)
+
+                # 在彈窗中找到 "Player details" 連結並點擊
+                player_details_link = None
+                wait_start = time.time()
+                max_wait = 1.0
+                attempt_count = 0
+
+                while time.time() - wait_start < max_wait:
+                    attempt_count += 1
+                    dialog_info = self.driver.execute_script("""
+                        var dialog = document.querySelector('div[role="dialog"]');
+                        if (dialog) {
+                            var links = dialog.querySelectorAll('a[href*="/player/"]');
+                            var linkTexts = [];
+                            for (var i = 0; i < links.length; i++) {
+                                linkTexts.push(links[i].textContent);
+                                if (links[i].textContent.indexOf('Player details') > -1) {
+                                    return {found: true, link: links[i], allLinks: linkTexts};
+                                }
+                            }
+                            return {found: false, link: null, allLinks: linkTexts};
+                        }
+                        return {found: false, link: null, allLinks: []};
+                    """)
+
+                    if dialog_info and dialog_info.get('found'):
+                        player_details_link = dialog_info['link']
+                        print(f"    彈窗中找到連結: {dialog_info['allLinks']}", file=sys.stderr)
+                        break
+                    elif attempt_count == 1:
+                        print(f"    彈窗狀態: 找到 {len(dialog_info.get('allLinks', []))} 個連結", file=sys.stderr)
+
+                    time.sleep(0.05)
+
+                if not player_details_link:
+                    # 如果沒找到 Player details 連結，關閉彈窗並返回
+                    print(f"[X] 未找到 Player details 連結（嘗試 {attempt_count} 次）", file=sys.stderr)
+                    self.close_dialog()
+                    return None, session_id
+
+                # 獲取玩家 URL 並添加房間篩選
+                try:
+                    player_href = player_details_link.get_attribute('href')
+                    print(f"    玩家連結: {player_href}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[X] 獲取玩家 URL 失敗: {str(e)}", file=sys.stderr)
+                    self.close_dialog()
+                    return None, session_id
+
+                room_number = room_info['room_number']
+                room_rank = room_info.get('rank', ROOM_RANK_MAPPING.get(room_number, 'Unknown'))
+
+                # 直接構建帶房間篩選的 URL
+                if player_href:
+                    # URL 格式: /player/{id}/{mode}
+                    filtered_url = f"{player_href}/{room_number}"
+                    print(f"[4] 前往玩家頁面（已篩選房間）: {filtered_url}", file=sys.stderr)
+                    print(f"    房間: {room_rank} (mode={room_number})", file=sys.stderr)
+
+                    # 直接導航到篩選後的 URL
+                    try:
+                        self.driver.get(filtered_url)
+                        print(f"[5] 頁面導航成功", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[X] 頁面導航失敗: {str(e)}", file=sys.stderr)
+                        return None, session_id
+
+                    # 等待頁面載入
+                    print(f"[6] 等待頁面載入...", file=sys.stderr)
+                    time.sleep(1.0)
+                else:
+                    print(f"[X] 無法獲取玩家 URL", file=sys.stderr)
+                    self.close_dialog()
+                    return None, session_id
+
+                # 等待牌譜連結出現
+                print(f"[7] 等待牌譜連結出現...", file=sys.stderr)
+                try:
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='paipu=']"))
+                    )
+                    print(f"[8] 牌譜連結已出現", file=sys.stderr)
+                except Exception as e:
+                    # 如果沒有牌譜連結，返回原頁面並恢復滾動位置
+                    print(f"[X] 未找到牌譜連結: {str(e)}", file=sys.stderr)
+                    self.driver.get(original_url)
+                    time.sleep(1)
+                    self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                    time.sleep(0.3)
+                    return None, session_id
+
+                # 下滑頁面以載入更多牌譜
+                print(f"[9] 下滑頁面載入更多牌譜...", file=sys.stderr)
+                for _ in range(3):
+                    self.driver.execute_script("window.scrollBy(0, 500);")
+                    time.sleep(0.3)
+
+                # 使用 JavaScript 計算牌譜連結數量（避免 stale element）
+                paipu_count = self.driver.execute_script("""
+                    return document.querySelectorAll('a[href*="paipu="]').length;
+                """)
+                print(f"[10] 找到 {paipu_count} 個牌譜連結", file=sys.stderr)
+
+                # 快速：先用候選時間直接匹配可見區域
+                time_candidates = self.get_time_candidates(start_time)
+                print(f"[10] 時間候選: {time_candidates}", file=sys.stderr)
+                print(f"    原始開始時間: {start_time}", file=sys.stderr)
+                print(f"    玩家列表: {players[:2]}...", file=sys.stderr)  # 只顯示前2個
+
+                # 先取得前5個牌譜的資料來除錯（包含完整的表格行）
+                sample_data = self.driver.execute_script("""
+                    var samples = [];
+
+                    // 嘗試找到表格行
+                    var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
+
+                    for (var i = 0; i < Math.min(5, rows.length); i++) {
+                        var row = rows[i];
+                        var columns = row.querySelectorAll('.ReactVirtualized__Table__rowColumn');
+
+                        var columnTexts = [];
+                        for (var j = 0; j < columns.length; j++) {
+                            var text = columns[j].innerText || columns[j].textContent || '';
+                            columnTexts.push(text.trim());
+                        }
+
+                        samples.push({
+                            index: i,
+                            fullText: row.innerText || row.textContent || '',
+                            columns: columnTexts
+                        });
+                    }
+
+                    return samples;
+                """)
+
+                print(f"    前5個牌譜樣本（表格行）:", file=sys.stderr)
+                for sample in sample_data:
+                    print(f"      [{sample['index']}] 欄位數={len(sample['columns'])}", file=sys.stderr)
+                    for col_idx, col_text in enumerate(sample['columns']):
+                        if col_text:
+                            print(f"          欄位{col_idx}: {col_text[:80]}", file=sys.stderr)
+
+                # 直接在 JavaScript 中提取 href，檢查所有欄位
+                matched_href = self.driver.execute_script("""
+                    var candidates = arguments[0];
+                    var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
+
+                    for (var i = 0; i < rows.length; i++) {
+                        var row = rows[i];
+                        var columns = row.querySelectorAll('.ReactVirtualized__Table__rowColumn');
+
+                        // 收集所有欄位的文字
+                        var allText = '';
+                        for (var k = 0; k < columns.length; k++) {
+                            allText += ' ' + (columns[k].innerText || columns[k].textContent || '');
+                        }
+
+                        // 檢查時間候選
+                        for (var j = 0; j < candidates.length; j++) {
+                            if (candidates[j] && allText.indexOf(candidates[j]) !== -1) {
+                                // 找到匹配，返回這一行的牌譜連結
+                                var link = row.querySelector('a[href*="paipu="]');
+                                if (link) {
+                                    return link.href;
+                                }
                             }
                         }
                     }
                     return null;
-                """)
-                
-                if api_url:
-                    break
-                    
-                time.sleep(0.05)  # Check every 50ms
-            
-            if api_url:
-                raw_paipu_id = self.extract_paipu_via_redirect(api_url)
-                if raw_paipu_id:
-                    clean_paipu_id = self.clean_paipu_id(raw_paipu_id)
+                """, time_candidates)
+
+                if matched_href and "paipu=" in matched_href:
+                    paipu_id = matched_href.split("paipu=")[1].split("_")[0]
+                    clean_paipu_id = self.clean_paipu_id(paipu_id)
                     if clean_paipu_id and self.is_valid_paipu_id(clean_paipu_id):
-                        # Close dialog by clicking outside or ESC
-                        self.close_dialog()
+                        print(f"[✓] 找到匹配的牌譜: {clean_paipu_id}", file=sys.stderr)
+                        print(f"[12] 返回原頁面並恢復滾動位置...", file=sys.stderr)
+                        self.driver.get(original_url)
+                        time.sleep(1)
+                        self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                        time.sleep(0.3)
                         return clean_paipu_id, session_id
-            
-            # Close dialog if extraction failed
-            self.close_dialog()
-            
-            return None, session_id
+
+                # 快速下滑以找出牌譜
+                print(f"[8-quick] 以快速下滑方式搜尋牌譜...", file=sys.stderr)
+                max_scrolls = 25 if self.fast_mode else 40
+                step = 1000 if self.fast_mode else 700
+                wait = 0.15 if self.fast_mode else 0.25
+
+                for _ in range(max_scrolls):
+                    self.driver.execute_script("window.scrollBy(0, arguments[0]);", step)
+                    self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+                    time.sleep(wait)
+                    # 檢查所有欄位
+                    matched_href = self.driver.execute_script("""
+                        var candidates = arguments[0];
+                        var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
+
+                        for (var i = 0; i < rows.length; i++) {
+                            var row = rows[i];
+                            var columns = row.querySelectorAll('.ReactVirtualized__Table__rowColumn');
+
+                            var allText = '';
+                            for (var k = 0; k < columns.length; k++) {
+                                allText += ' ' + (columns[k].innerText || columns[k].textContent || '');
+                            }
+
+                            for (var j = 0; j < candidates.length; j++) {
+                                if (candidates[j] && allText.indexOf(candidates[j]) !== -1) {
+                                    var link = row.querySelector('a[href*="paipu="]');
+                                    if (link) {
+                                        return link.href;
+                                    }
+                                }
+                            }
+                        }
+                        return null;
+                    """, time_candidates)
+                    if matched_href and "paipu=" in matched_href:
+                        paipu_id = matched_href.split("paipu=")[1].split("_")[0]
+                        clean_paipu_id = self.clean_paipu_id(paipu_id)
+                        if clean_paipu_id and self.is_valid_paipu_id(clean_paipu_id):
+                            print(f"[✓] 找到匹配的牌譜: {clean_paipu_id}", file=sys.stderr)
+                            print(f"[12] 返回原頁面並恢復滾動位置...", file=sys.stderr)
+                            self.driver.get(original_url)
+                            time.sleep(1)
+                            self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                            time.sleep(0.3)
+                            return clean_paipu_id, session_id
+
+
+                # 備用方案：使用 JavaScript 遍歷所有牌譜連結（避免 stale element）
+                print(f"[11] 使用備用方案搜尋牌譜...", file=sys.stderr)
+
+                # 準備玩家名稱列表
+                clean_names = []
+                for ptxt in players:
+                    t = ptxt.split(']', 1)[1].strip() if ']' in ptxt else ptxt
+                    t = re.sub(r"\s*\[\s*-?\d+\s*\]\s*$", "", t)
+                    if t:
+                        clean_names.append(t)
+
+                print(f"    清理後的玩家名稱: {clean_names}", file=sys.stderr)
+                print(f"    搜尋時間: {start_time}", file=sys.stderr)
+
+                # 使用 JavaScript 搜尋匹配的牌譜（檢查所有欄位）
+                result = self.driver.execute_script("""
+                    var players = arguments[0];
+                    var startTime = arguments[1];
+                    var rows = document.querySelectorAll('.ReactVirtualized__Table__row');
+
+                    var debugInfo = [];
+
+                    for (var i = 0; i < Math.min(rows.length, 100); i++) {
+                        var row = rows[i];
+                        var columns = row.querySelectorAll('.ReactVirtualized__Table__rowColumn');
+
+                        // 收集所有欄位的文字
+                        var allText = '';
+                        var columnTexts = [];
+                        for (var k = 0; k < columns.length; k++) {
+                            var colText = columns[k].innerText || columns[k].textContent || '';
+                            allText += ' ' + colText;
+                            columnTexts.push(colText.trim());
+                        }
+
+                        var nameMatches = 0;
+
+                        // 計算玩家名稱匹配數
+                        for (var j = 0; j < players.length; j++) {
+                            if (allText.indexOf(players[j]) !== -1) {
+                                nameMatches++;
+                            }
+                        }
+
+                        // 檢查時間匹配
+                        var timeMatch = allText.indexOf(startTime) !== -1;
+
+                        // 收集前3個的除錯資訊
+                        if (i < 3) {
+                            debugInfo.push({
+                                index: i,
+                                nameMatches: nameMatches,
+                                timeMatch: timeMatch,
+                                text: allText.substring(0, 150),
+                                columns: columnTexts
+                            });
+                        }
+
+                        // 如果至少3個玩家名稱匹配或時間匹配
+                        if (nameMatches >= 3 || timeMatch) {
+                            var link = row.querySelector('a[href*="paipu="]');
+                            if (link) {
+                                return {
+                                    found: true,
+                                    href: link.href,
+                                    index: i,
+                                    nameMatches: nameMatches,
+                                    timeMatch: timeMatch,
+                                    rowText: allText.substring(0, 150),
+                                    debugInfo: debugInfo
+                                };
+                            }
+                        }
+                    }
+
+                    return {found: false, debugInfo: debugInfo};
+                """, clean_names, start_time)
+
+                # 顯示除錯資訊
+                if result and 'debugInfo' in result:
+                    print(f"    前3個牌譜的匹配情況:", file=sys.stderr)
+                    for info in result['debugInfo']:
+                        print(f"      [{info['index']}] 玩家匹配={info['nameMatches']}, 時間匹配={info['timeMatch']}", file=sys.stderr)
+                        if 'columns' in info and info['columns']:
+                            print(f"          欄位數: {len(info['columns'])}", file=sys.stderr)
+                            for col_idx, col_text in enumerate(info['columns']):
+                                if col_text:
+                                    print(f"            欄位{col_idx}: {col_text[:60]}", file=sys.stderr)
+                        else:
+                            print(f"          內容: {info['text']}", file=sys.stderr)
+
+                if result and result.get('found'):
+                    href = result['href']
+                    if href and "paipu=" in href:
+                        paipu_id = href.split("paipu=")[1].split("_")[0]
+                        clean_paipu_id = self.clean_paipu_id(paipu_id)
+
+                        if clean_paipu_id and self.is_valid_paipu_id(clean_paipu_id):
+                            print(f"[✓] 找到匹配的牌譜: {clean_paipu_id}", file=sys.stderr)
+                            print(f"    匹配資訊: 玩家={result['nameMatches']}, 時間={result['timeMatch']}", file=sys.stderr)
+                            print(f"[12] 返回原頁面並恢復滾動位置...", file=sys.stderr)
+                            self.driver.get(original_url)
+                            time.sleep(1)
+                            self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                            time.sleep(0.3)
+                            return clean_paipu_id, session_id
+
+                print(f"[X] 未找到匹配的牌譜", file=sys.stderr)
+
+                # 如果沒找到匹配的，返回原頁面並恢復滾動位置
+                print(f"[12] 返回原頁面並恢復滾動位置...", file=sys.stderr)
+                self.driver.get(original_url)
+                time.sleep(1)
+                self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                time.sleep(0.3)
+                return None, session_id
+
+            except Exception as e:
+                # 發生錯誤時返回原頁面並恢復滾動位置
+                print(f"[ERROR] 處理過程出錯: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                try:
+                    self.driver.get(original_url)
+                    time.sleep(1)
+                    self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                    time.sleep(0.3)
+                except:
+                    pass
+                return None, session_id
+
         except Exception as e:
-            # Close dialog on error
-            try:
-                self.close_dialog()
-            except:
-                pass
+            print(f"[ERROR] 外層錯誤: {e}", file=sys.stderr)
             return None, None
-    
+
     def process_room_with_continuous_scroll(self, room_info, max_paipus=5):
         extracted_paipus = []
         processed_session_ids = set()
-        
+
         import sys
         print(f"\n{'='*60}", file=sys.stderr)
         print(f"Starting to process room: {room_info['rank']} ({room_info['room_number']})", file=sys.stderr)
         print(f"Date: {room_info['date']}", file=sys.stderr)
         print(f"Target paipu count: {max_paipus}", file=sys.stderr)
         print(f"{'='*60}\n", file=sys.stderr)
-        
+
         try:
             print(f"Loading page: {room_info['url']}", file=sys.stderr)
             self.driver.get(room_info['url'])
-            
+
             print(f"Waiting for table to load...", file=sys.stderr)
             if not self.wait_for_table_load():
                 print(f"Table load failed!", file=sys.stderr)
                 return []
             print(f"Table loaded successfully", file=sys.stderr)
-            
+
             # Additional wait for headless mode to ensure full initialization
             if self.headless:
                 wait_time = 1.5 if self.fast_mode else 3
                 print(f"  Headless mode: Extra initialization wait ({wait_time}s)...", file=sys.stderr)
                 time.sleep(wait_time)
-                
+
                 # # Debug: Save screenshot in headless mode to verify page loaded
                 # try:
                 #     screenshot_path = f"debug_headless_{room_info['date']}_{room_info['room_number']}.png"
@@ -564,16 +1033,16 @@ class OptimizedPaipuExtractor:
                 #     print(f"  Debug screenshot saved: {screenshot_path}", file=sys.stderr)
                 # except:
                 #     pass
-            
+
             # Get initial page information
             initial_page_height = self.driver.execute_script("return document.body.scrollHeight;")
             print(f"  Initial page height: {initial_page_height}px", file=sys.stderr)
-            
+
             self.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
 
             print(f"Reset scroll position to top", file=sys.stderr)
-            
+
             # Warm-up scrolling for headless mode to initialize virtual scrolling
             if self.headless:
                 if self.fast_mode:
@@ -593,7 +1062,7 @@ class OptimizedPaipuExtractor:
                     self.driver.execute_script("window.scrollTo(0, 0);")
                     time.sleep(1)
                     print(f"  Warm-up complete", file=sys.stderr)
-            
+
             scroll_position = 0
             # Adjust scroll speed based on mode
             if self.fast_mode:
@@ -602,29 +1071,29 @@ class OptimizedPaipuExtractor:
                 scroll_step = 600  # Headless careful: 600 pixels
             else:
                 scroll_step = 800  # Normal mode: 800 pixels
-            max_scroll_attempts = 99999999 
+            max_scroll_attempts = 99999999
             consecutive_no_new = 0
-            
+
             if self.fast_mode:
                 print(f"  ⚡ Fast mode: scroll={scroll_step}px, threshold=80, full_processing=enabled", file=sys.stderr)
-            
+
             print(f"\nStarting scroll processing loop...", file=sys.stderr)
-            
+
             for scroll_count in range(max_scroll_attempts):
                 if len(extracted_paipus) >= max_paipus:
                     print(f"\nReached target paipu count ({max_paipus}), stopping scroll", file=sys.stderr)
                     break
-                
+
                 # Re-fetch page dimensions each iteration (important for dynamic virtual scrolling)
                 current_position = self.driver.execute_script("return window.pageYOffset;")
                 viewport_height = self.driver.execute_script("return window.innerHeight;")
                 page_height = self.driver.execute_script("return document.body.scrollHeight;")
-                
+
                 # Output progress every 50 scrolls (reduce I/O)
                 if scroll_count % 50 == 0:
                     progress_pct = (current_position / page_height * 100) if page_height > 0 else 0
                     print(f"\nScroll progress #{scroll_count}: position={current_position}/{page_height} ({progress_pct:.1f}%) | collected={len(extracted_paipus)}/{max_paipus} | consecutive_no_new={consecutive_no_new}", file=sys.stderr)
-                    
+
                     # Health check every 200 scrolls
                     if scroll_count % 200 == 0:
                         try:
@@ -637,7 +1106,7 @@ class OptimizedPaipuExtractor:
                             print(f"  Health check (#{scroll_count}): page_state={is_alive}, visible_rows={visible_rows}", file=sys.stderr)
                         except Exception as e:
                             print(f"  Health check failed: {e}", file=sys.stderr)
-                
+
                 processed_any = False
                 # Adjust attempts based on mode
                 if self.fast_mode:
@@ -646,23 +1115,25 @@ class OptimizedPaipuExtractor:
                     max_attempts_per_scroll = 15  # Headless: more thorough
                 else:
                     max_attempts_per_scroll = 10  # Normal mode
-                
+
                 for attempt in range(max_attempts_per_scroll):
                     if len(extracted_paipus) >= max_paipus:
                         break
-                    
+
                     unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
-                    
+
                     if unprocessed_game:
                         paipu_id, session_id = self.click_game_and_extract_paipu_safe(
                             unprocessed_game, room_info
                         )
-                        
+
                         if paipu_id and paipu_id not in extracted_paipus:
                             extracted_paipus.append(paipu_id)
                             processed_session_ids.add(session_id)
                             processed_any = True
                             print(f"  Successfully extracted paipu #{len(extracted_paipus)}: {paipu_id}", file=sys.stderr)
+                            # 立即輸出到 stdout 供 PaipuSpider 即時讀取
+                            print(paipu_id, flush=True)
                         elif session_id:
                             processed_session_ids.add(session_id)
                             processed_any = True
@@ -670,7 +1141,7 @@ class OptimizedPaipuExtractor:
                     else:
                         # No more unprocessed games at current position
                         break
-                
+
                 if not processed_any:
                     consecutive_no_new += 1
                     # Adjust patience based on mode
@@ -685,7 +1156,7 @@ class OptimizedPaipuExtractor:
                         break
                 else:
                     consecutive_no_new = 0
-                
+
                 # Check if reached page bottom
                 # Important: Don't break immediately, check multiple times to handle dynamic height changes
                 if current_position + viewport_height >= page_height - 50:
@@ -694,9 +1165,9 @@ class OptimizedPaipuExtractor:
                     time.sleep(0.5)
                     new_height = self.driver.execute_script("return document.body.scrollHeight;")
                     new_position = self.driver.execute_script("return window.pageYOffset;")
-                    
+
                     print(f"\nPossible bottom detected: pos={new_position}, height={new_height} (was {old_height})", file=sys.stderr)
-                    
+
                     # Only break if height is stable and we're really at bottom
                     if new_position + viewport_height >= new_height - 50 and abs(new_height - old_height) < 100:
                         print(f"Confirmed page bottom reached", file=sys.stderr)
@@ -705,10 +1176,10 @@ class OptimizedPaipuExtractor:
                         print(f"False alarm - page height changed, continuing scroll...", file=sys.stderr)
                         # Update page_height for next iteration
                         page_height = new_height
-                
+
                 # Execute scroll
                 scroll_position += scroll_step
-                
+
                 # Handle case where page height shrinks during scroll (common with virtual scrolling)
                 current_page_height = self.driver.execute_script("return document.body.scrollHeight;")
                 if scroll_position > current_page_height - viewport_height:
@@ -717,12 +1188,12 @@ class OptimizedPaipuExtractor:
                     scroll_position = max(0, current_page_height - viewport_height)
                     if scroll_count % 50 == 0 and old_scroll_pos != scroll_position:
                         print(f"  Adjusted scroll position: {old_scroll_pos} -> {scroll_position} (page height: {current_page_height})", file=sys.stderr)
-                
+
                 self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                
+
                 # Force trigger page re-render (important for virtual scrolling)
                 self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
-                
+
                 # Wait for content to load - critical for virtual scrolling!
                 if self.fast_mode:
                     time.sleep(0.5)  # Fast: must wait enough for processing (NOT just rendering)
@@ -730,7 +1201,7 @@ class OptimizedPaipuExtractor:
                     time.sleep(0.8)  # Headless: more wait
                 else:
                     time.sleep(0.5)  # Normal
-                
+
                 # Check if scroll actually moved
                 new_position = self.driver.execute_script("return window.pageYOffset;")
                 if new_position == current_position:
@@ -738,18 +1209,18 @@ class OptimizedPaipuExtractor:
                         print(f"  Warning: Scroll not effective! Position stays at {current_position}", file=sys.stderr)
                     # Try different way to scroll
                     self.driver.execute_script(f"window.scrollBy(0, {scroll_step});")
-            
+
             # Headless mode: Reverse scroll from bottom to top
             # Fast mode uses a quicker version
             if self.headless:
                 print(f"\n{'-'*60}", file=sys.stderr)
                 print(f"Headless mode: Performing reverse scan (bottom to top)...", file=sys.stderr)
-                
+
                 # Scroll to bottom first
                 page_height = self.driver.execute_script("return document.body.scrollHeight;")
                 self.driver.execute_script(f"window.scrollTo(0, {page_height});")
                 time.sleep(2)
-                
+
                 reverse_found = 0
                 # Adjust reverse scan based on mode
                 if self.fast_mode:
@@ -762,17 +1233,17 @@ class OptimizedPaipuExtractor:
                     max_reverse_iterations = 200
                     reverse_attempts = 15
                     reverse_wait = 0.5
-                
+
                 reverse_position = page_height
-                
+
                 for rev_count in range(max_reverse_iterations):
                     if len(extracted_paipus) >= max_paipus:
                         break
-                    
+
                     for attempt in range(reverse_attempts):
                         if len(extracted_paipus) >= max_paipus:
                             break
-                        
+
                         unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
                         if unprocessed_game:
                             paipu_id, session_id = self.click_game_and_extract_paipu_safe(
@@ -783,27 +1254,29 @@ class OptimizedPaipuExtractor:
                                 processed_session_ids.add(session_id)
                                 reverse_found += 1
                                 print(f"  Reverse scan found paipu #{len(extracted_paipus)}: {paipu_id}", file=sys.stderr)
+                                # 立即輸出到 stdout
+                                print(paipu_id, flush=True)
                             elif session_id:
                                 processed_session_ids.add(session_id)
                         else:
                             break
-                    
+
                     # Check if at top
                     current_pos = self.driver.execute_script("return window.pageYOffset;")
                     if current_pos <= 100:
                         print(f"  Reverse scan reached top", file=sys.stderr)
                         break
-                    
+
                     reverse_position += reverse_step
                     if reverse_position < 0:
                         reverse_position = 0
                     self.driver.execute_script(f"window.scrollTo(0, {reverse_position});")
                     self.driver.execute_script("window.dispatchEvent(new Event('scroll'));")
                     time.sleep(reverse_wait)
-                
+
                 print(f"Reverse scan completed: found {reverse_found} additional paipus", file=sys.stderr)
                 print(f"{'-'*60}\n", file=sys.stderr)
-            
+
             # Final sweep: Multiple passes to catch any missed paipus
             print(f"\n{'-'*60}", file=sys.stderr)
             if self.fast_mode:
@@ -813,16 +1286,16 @@ class OptimizedPaipuExtractor:
                 print(f"Performing final sweep to catch any missed paipus...", file=sys.stderr)
                 # Headless mode: Do 2 complete sweeps for better coverage
                 num_sweeps = 2 if self.headless else 1
-            
+
             total_final_found = 0
-            
+
             for sweep_pass in range(num_sweeps):
                 if sweep_pass > 0:
                     print(f"  Starting sweep pass {sweep_pass + 1}/{num_sweeps}...", file=sys.stderr)
-                
+
                 self.driver.execute_script("window.scrollTo(0, 0);")
                 time.sleep(1.5 if self.headless else 1)
-                
+
                 final_sweep_scroll = 0
                 # Adjust sweep step based on mode
                 if self.fast_mode:
@@ -832,13 +1305,13 @@ class OptimizedPaipuExtractor:
                 else:
                     final_sweep_step = 500  # Normal steps
                 final_sweep_found = 0
-                
+
                 # Adjust iterations based on mode
                 max_iterations = 120 if self.fast_mode else 300  # More for coverage
                 for sweep_count in range(max_iterations):
                     if len(extracted_paipus) >= max_paipus:
                         break
-                    
+
                     # Adjust attempts per position based on mode
                     if self.fast_mode:
                         sweep_attempts = 8   # Fast: more for reliability
@@ -849,7 +1322,7 @@ class OptimizedPaipuExtractor:
                     for attempt in range(sweep_attempts):
                         if len(extracted_paipus) >= max_paipus:
                             break
-                        
+
                         unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
                         if unprocessed_game:
                             paipu_id, session_id = self.click_game_and_extract_paipu_safe(
@@ -860,11 +1333,13 @@ class OptimizedPaipuExtractor:
                                 processed_session_ids.add(session_id)
                                 final_sweep_found += 1
                                 print(f"  Final sweep pass {sweep_pass + 1} found paipu #{len(extracted_paipus)}: {paipu_id}", file=sys.stderr)
+                                # 立即輸出到 stdout
+                                print(paipu_id, flush=True)
                             elif session_id:
                                 processed_session_ids.add(session_id)
                         else:
                             break
-                    
+
                     # Check if at bottom (with dynamic height verification)
                     current_pos = self.driver.execute_script("return window.pageYOffset;")
                     viewport_h = self.driver.execute_script("return window.innerHeight;")
@@ -877,7 +1352,7 @@ class OptimizedPaipuExtractor:
                             print(f"  Final sweep reached bottom", file=sys.stderr)
                             break
                         # If page height changed significantly, continue scanning
-                    
+
                     final_sweep_scroll += final_sweep_step
                     self.driver.execute_script(f"window.scrollTo(0, {final_sweep_scroll});")
                     # Trigger scroll event explicitly
@@ -889,57 +1364,57 @@ class OptimizedPaipuExtractor:
                         time.sleep(0.5)
                     else:
                         time.sleep(0.3)
-                
+
                 total_final_found += final_sweep_found
                 print(f"  Sweep pass {sweep_pass + 1} completed: found {final_sweep_found} additional paipus", file=sys.stderr)
-            
+
             print(f"All final sweeps completed: found {total_final_found} additional paipus total", file=sys.stderr)
             print(f"{'-'*60}\n", file=sys.stderr)
-            
+
             print(f"\n{'='*60}", file=sys.stderr)
             print(f"Room processing completed: {room_info['rank']}", file=sys.stderr)
             print(f"Collected {len(extracted_paipus)} paipus", file=sys.stderr)
             print(f"Processed {len(processed_session_ids)} games", file=sys.stderr)
             print(f"Total scrolls: {scroll_count}", file=sys.stderr)
             print(f"{'='*60}\n", file=sys.stderr)
-            
+
             return extracted_paipus
-            
+
         except Exception as e:
             print(f"\nError processing room: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
             print(f"Collected {len(extracted_paipus)} paipus before error", file=sys.stderr)
             return extracted_paipus
-    
+
     def extract_from_rooms(self, target_date, target_ranks=None, max_paipus=5):
         if target_ranks is None:
             target_ranks = ["Jade"]
-        
+
         all_paipus = []
-        
+
         try:
             room_urls = self.get_room_urls_by_ranks(target_date, target_ranks)
-            
+
             if not room_urls:
                 return []
-            
+
             for room_info in room_urls:
                 if len(all_paipus) >= max_paipus:
                     break
-                
+
                 remaining_slots = max_paipus - len(all_paipus)
                 room_paipus = self.process_room_with_continuous_scroll(room_info, remaining_slots)
-                
+
                 for paipu in room_paipus:
                     if paipu not in all_paipus:
                         all_paipus.append(paipu)
-            
+
             return all_paipus
-            
+
         except:
             return all_paipus
-    
+
     def close(self):
         if self.driver:
             try:
@@ -966,22 +1441,22 @@ def main():
     max_paipus = 99999
     headless_mode = True
     fast_mode = False  # 快速模式：True=快速但可能漏5-10%, False=完整但较慢
-    
+
     target_ranks = convert_ranks_to_english(target_ranks)
-    
+
     extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode)
-    
+
     try:
         results = extractor.extract_from_rooms(
             target_date=target_date,
             target_ranks=target_ranks,
             max_paipus=max_paipus
         )
-        
+
         # Output only paipu IDs, one per line
         for paipu in results:
             print(paipu)
-        
+
     finally:
         extractor.close()
 
