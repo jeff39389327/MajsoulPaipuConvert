@@ -98,11 +98,31 @@ Create or modify `crawler_config.json` in `paipu_project/paipu_project/` directo
 - fast_mode: false for complete mode (100% accuracy, ~30-40 records/min)
 - fast_mode: true for fast mode (slightly faster, suitable for large-scale collection)
 
+#### Mode D: Date Room Player Mode (Comprehensive Player Page Crawl)
+
+```json
+{
+  "crawler_mode": "date_room_player",
+  "start_date": "2019-08-20",
+  "end_date": "2019-08-23",
+  "target_room": "Jade",
+  "output_filename": "date_room_player_list.txt",
+  "headless_mode": true,
+  "fast_mode": false
+}
+```
+
+**Date Room Player Mode Notes:**
+- For each game in the date range, visits all player pages to collect all game logs
+- More comprehensive than date_room mode, captures all games from all players
+- Slower than date_room mode but ensures maximum coverage
+- Recommended for complete historical data collection
+
 ### Configuration Parameters
 
 | Parameter | Description | Options | Default |
 |-----------|-------------|---------|---------|
-| `crawler_mode` | Crawler mode | `"auto"`, `"manual"`, `"date_room"` | `"auto"` |
+| `crawler_mode` | Crawler mode | `"auto"`, `"manual"`, `"date_room"`, `"date_room_player"` | `"auto"` |
 | `manual_player_urls` | Manual player URL list | URL array | `[]` |
 | `time_periods` | Time periods (auto mode) | `"4w"`, `"1w"`, `"3d"`, `"1d"` | `["4w", "1w", "3d"]` |
 | `ranks` | Ranks (auto mode) | `"Throne"`, `"Jade"`, `"Gold"`, `"Throne East"`, `"Jade East"`, `"Gold East"`, `"All"` | `["Gold"]` |

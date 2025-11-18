@@ -51,16 +51,19 @@ CLICK_DELAY_MAX = 0.3        # 点击最大延迟
 
 class OptimizedPaipuExtractor:
 
-    def __init__(self, headless=True, fast_mode=False):
+    def __init__(self, headless=True, fast_mode=False, player_mode=False):
         """
         Args:
             headless: 是否使用无头模式
             fast_mode: 快速模式（速度优先，可能漏掉少量数据）
                       False: 完全模式，确保获取所有数据（慢但准确）
                       True: 快速模式，跳过部分扫描（快但可能漏 5-10%）
+            player_mode: True 表示啟用逐玩家頁面模式（date_room_player），
+                         每局會依序進入所有玩家頁面收集所有牌譜 ID
         """
         self.headless = headless
         self.fast_mode = fast_mode
+        self.player_mode = player_mode
         self.driver = None
         self.temp_user_data_dir = None
         self.setup_driver()
@@ -508,7 +511,10 @@ class OptimizedPaipuExtractor:
                                     var text = playerLinks[j].textContent.trim();
                                     var href = playerLinks[j].href;
                                     if (text) players.push(text);
-                                    if (href) playerHrefs.push(href);
+                                    // 只收集指向玩家頁面的連結
+                                    if (href && href.indexOf('/player/') > -1) {
+                                        playerHrefs.push(href);
+                                    }
                                 }
 
                                 var startTime = columns[2].getAttribute('title') || columns[2].textContent.trim();
@@ -999,6 +1005,160 @@ class OptimizedPaipuExtractor:
             print(f"[ERROR] 外層錯誤: {e}", file=sys.stderr)
             return None, None
 
+
+    def collect_all_paipus_on_player_page(self, existing_ids=None):
+        """在當前玩家頁面向下捲動並收集所有 paipu= 連結的牌譜 ID。
+
+        Args:
+            existing_ids: 用來避免重複加入的 ID set，允許為 None。
+
+        Returns:
+            List[str]: 本次在該玩家頁面新收集到的所有牌譜 ID。
+        """
+        import sys
+
+        if existing_ids is None:
+            existing_ids = set()
+
+        collected = []
+
+        try:
+            print(f"[PlayerMode] 等待玩家頁面 paipu 連結載入...", file=sys.stderr)
+            try:
+                WebDriverWait(self.driver, 20).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='paipu=']"))
+                )
+            except Exception as e:
+                print(f"[PlayerMode] 等待 paipu 連結超時: {e}", file=sys.stderr)
+
+            time.sleep(1)
+
+            while True:
+                paipu_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='paipu=']")
+                if not paipu_links:
+                    paipu_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, 'paipu=')]")
+
+                for link in paipu_links:
+                    href = link.get_attribute("href")
+                    if not href or "paipu=" not in href:
+                        continue
+
+                    paipu_id = href.split("paipu=")[1].split("_")[0]
+                    clean_paipu_id = self.clean_paipu_id(paipu_id)
+                    if not clean_paipu_id or not self.is_valid_paipu_id(clean_paipu_id):
+                        continue
+
+                    if clean_paipu_id in existing_ids:
+                        continue
+
+                    existing_ids.add(clean_paipu_id)
+                    collected.append(clean_paipu_id)
+
+                    # 立即輸出到 stdout 供 Spider 即時讀取
+                    print(f"[PlayerMode] 收集到牌譜 #{len(collected)}: {clean_paipu_id}", file=sys.stderr)
+                    print(clean_paipu_id, flush=True)
+
+                # 檢查是否已經滾動到底部
+                at_bottom = self.driver.execute_script(
+                    "return window.innerHeight + window.scrollY + 10 >= document.body.offsetHeight"
+                )
+                if at_bottom:
+                    break
+
+                self.driver.execute_script("window.scrollBy(0, 500);")
+                time.sleep(random.uniform(0.3, 0.8))
+
+            print(f"[PlayerMode] 玩家頁面共新增 {len(collected)} 個牌譜", file=sys.stderr)
+
+        except Exception as e:
+            print(f"[PlayerMode] 收集玩家頁面牌譜時發生錯誤: {e}", file=sys.stderr)
+
+        return collected
+
+    def collect_all_paipus_for_game_player_mode(self, game_record, room_info):
+        """player_mode 下：對單局的所有玩家逐一進入玩家頁面並收集所有牌譜 ID。
+
+        Returns:
+            Tuple[List[str], Optional[str]]: (該局所有新收集到的牌譜 ID, session_id)
+        """
+        import sys
+
+        try:
+            players = game_record["players"]
+            start_time = game_record["start_time"]
+            end_time = game_record["end_time"]
+            player_hrefs = game_record.get("player_hrefs", [])
+            session_id = game_record.get("session_id") or self.create_game_session_id(
+                players, start_time, end_time, room_info["room_number"]
+            )
+
+            if not player_hrefs:
+                print("[PlayerMode] game_record 中沒有 player_hrefs，跳過", file=sys.stderr)
+                return [], session_id
+
+            # 保存原日期房間頁面的 URL 與滾動位置
+            original_url = self.driver.current_url
+            original_scroll_position = self.driver.execute_script("return window.pageYOffset;")
+
+            room_number = room_info["room_number"]
+            room_rank = room_info.get("rank", ROOM_RANK_MAPPING.get(room_number, "Unknown"))
+
+            print(f"\n{'='*60}", file=sys.stderr)
+            print(f"[PlayerMode] 處理遊戲（逐玩家模式）", file=sys.stderr)
+            print(f"  房間: {room_rank} (mode={room_number})", file=sys.stderr)
+            print(f"  玩家: {players}", file=sys.stderr)
+            print(f"  開始時間: {start_time}", file=sys.stderr)
+            print(f"  player_hrefs: {player_hrefs}", file=sys.stderr)
+            print(f"{'='*60}", file=sys.stderr)
+
+            all_new_paipus = []
+            seen_ids = set()
+
+            for idx, player_href in enumerate(player_hrefs):
+                if not player_href:
+                    print(f"[PlayerMode] 跳過空的 player_href (idx={idx})", file=sys.stderr)
+                    continue
+
+                player_name = players[idx] if idx < len(players) else f"Player#{idx + 1}"
+
+                print(f"[PlayerMode] 處理玩家 #{idx}: {player_name}", file=sys.stderr)
+                print(f"[PlayerMode]   原始 player_href: {player_href}", file=sys.stderr)
+
+                # 確保 player_href 是玩家頁面的 URL
+                if '/player/' not in player_href:
+                    print(f"[PlayerMode] 警告: player_href 不包含 '/player/'，跳過", file=sys.stderr)
+                    continue
+
+                try:
+                    filtered_url = f"{player_href}/{room_number}"
+                    print(f"[PlayerMode]   構建的 filtered_url: {filtered_url}", file=sys.stderr)
+                    self.driver.get(filtered_url)
+                    time.sleep(1.0)
+                except Exception as e:
+                    print(f"[PlayerMode] 無法開啟玩家頁面 {player_name}: {e}", file=sys.stderr)
+                    continue
+
+                player_paipus = self.collect_all_paipus_on_player_page(existing_ids=seen_ids)
+                print(f"[PlayerMode] 玩家 {player_name} 新增 {len(player_paipus)} 個牌譜", file=sys.stderr)
+                all_new_paipus.extend(player_paipus)
+
+            # 返回原日期房間頁面並恢復滾動位置
+            try:
+                print(f"[PlayerMode] 返回日期房間頁面並恢復滾動位置...", file=sys.stderr)
+                self.driver.get(original_url)
+                time.sleep(1)
+                self.driver.execute_script(f"window.scrollTo(0, {original_scroll_position});")
+                time.sleep(0.3)
+            except Exception as e:
+                print(f"[PlayerMode] 返回日期房間頁面失敗: {e}", file=sys.stderr)
+
+            return all_new_paipus, session_id
+
+        except Exception as e:
+            print(f"[PlayerMode] 處理遊戲時發生錯誤: {e}", file=sys.stderr)
+            return [], None
+
+
     def process_room_with_continuous_scroll(self, room_info, max_paipus=5):
         extracted_paipus = []
         processed_session_ids = set()
@@ -1122,7 +1282,29 @@ class OptimizedPaipuExtractor:
 
                     unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
 
-                    if unprocessed_game:
+                    if not unprocessed_game:
+                        # No more unprocessed games at current position
+                        break
+
+                    # 根據模式選擇不同的處理方式
+                    if self.player_mode:
+                        paipu_ids, session_id = self.collect_all_paipus_for_game_player_mode(
+                            unprocessed_game, room_info
+                        )
+
+                        if session_id:
+                            processed_session_ids.add(session_id)
+                            processed_any = True
+
+                        # 注意：paipu_ids 中的每個 ID 已經在 collect_all_paipus_on_player_page 中即時輸出到 stdout
+                        # 這裡只需要加入到 extracted_paipus 列表中，不需要再次輸出
+                        for paipu_id in paipu_ids:
+                            if len(extracted_paipus) >= max_paipus:
+                                break
+                            if paipu_id not in extracted_paipus:
+                                extracted_paipus.append(paipu_id)
+                                processed_any = True
+                    else:
                         paipu_id, session_id = self.click_game_and_extract_paipu_safe(
                             unprocessed_game, room_info
                         )
@@ -1138,9 +1320,6 @@ class OptimizedPaipuExtractor:
                             processed_session_ids.add(session_id)
                             processed_any = True
                             # print(f"  Game already processed but no paipu (session: {session_id[:8]}...)", file=sys.stderr)
-                    else:
-                        # No more unprocessed games at current position
-                        break
 
                 if not processed_any:
                     consecutive_no_new += 1
@@ -1245,7 +1424,26 @@ class OptimizedPaipuExtractor:
                             break
 
                         unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
-                        if unprocessed_game:
+                        if not unprocessed_game:
+                            break
+
+                        if self.player_mode:
+                            paipu_ids, session_id = self.collect_all_paipus_for_game_player_mode(
+                                unprocessed_game, room_info
+                            )
+
+                            if session_id:
+                                processed_session_ids.add(session_id)
+
+                            # 注意：paipu_ids 中的每個 ID 已經在 collect_all_paipus_on_player_page 中即時輸出到 stdout
+                            # 這裡只需要加入到 extracted_paipus 列表中，不需要再次輸出
+                            for paipu_id in paipu_ids:
+                                if len(extracted_paipus) >= max_paipus:
+                                    break
+                                if paipu_id not in extracted_paipus:
+                                    extracted_paipus.append(paipu_id)
+                                    reverse_found += 1
+                        else:
                             paipu_id, session_id = self.click_game_and_extract_paipu_safe(
                                 unprocessed_game, room_info
                             )
@@ -1258,8 +1456,6 @@ class OptimizedPaipuExtractor:
                                 print(paipu_id, flush=True)
                             elif session_id:
                                 processed_session_ids.add(session_id)
-                        else:
-                            break
 
                     # Check if at top
                     current_pos = self.driver.execute_script("return window.pageYOffset;")
@@ -1324,7 +1520,26 @@ class OptimizedPaipuExtractor:
                             break
 
                         unprocessed_game = self.get_first_unprocessed_game(processed_session_ids, room_info['room_number'])
-                        if unprocessed_game:
+                        if not unprocessed_game:
+                            break
+
+                        if self.player_mode:
+                            paipu_ids, session_id = self.collect_all_paipus_for_game_player_mode(
+                                unprocessed_game, room_info
+                            )
+
+                            if session_id:
+                                processed_session_ids.add(session_id)
+
+                            # 注意：paipu_ids 中的每個 ID 已經在 collect_all_paipus_on_player_page 中即時輸出到 stdout
+                            # 這裡只需要加入到 extracted_paipus 列表中，不需要再次輸出
+                            for paipu_id in paipu_ids:
+                                if len(extracted_paipus) >= max_paipus:
+                                    break
+                                if paipu_id not in extracted_paipus:
+                                    extracted_paipus.append(paipu_id)
+                                    final_sweep_found += 1
+                        else:
                             paipu_id, session_id = self.click_game_and_extract_paipu_safe(
                                 unprocessed_game, room_info
                             )
@@ -1337,8 +1552,6 @@ class OptimizedPaipuExtractor:
                                 print(paipu_id, flush=True)
                             elif session_id:
                                 processed_session_ids.add(session_id)
-                        else:
-                            break
 
                     # Check if at bottom (with dynamic height verification)
                     current_pos = self.driver.execute_script("return window.pageYOffset;")
