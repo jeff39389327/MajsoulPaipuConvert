@@ -107,8 +107,13 @@ class OptimizedPaipuExtractor:
         chrome_options.add_argument("--disable-infobars")
         chrome_options.add_argument("--disable-notifications")
         chrome_options.add_argument("--ignore-certificate-errors")
-        # Larger window size for headless mode to ensure proper rendering
-        chrome_options.add_argument("--window-size=1920,3000")
+        # Set window size based on mode
+        if self.headless:
+            chrome_options.add_argument("--window-size=1920,3000")
+        else:
+            # Smaller, more manageable size for visible mode
+            chrome_options.add_argument("--window-size=1280,800")
+        
         # Force device scale factor
         chrome_options.add_argument("--force-device-scale-factor=1")
 
@@ -226,6 +231,17 @@ class OptimizedPaipuExtractor:
             import traceback
             traceback.print_exc()
             raise
+
+    def restart_driver(self):
+        import sys
+        print("Restarting Chrome driver...", file=sys.stderr)
+        try:
+            if self.driver:
+                self.driver.quit()
+        except:
+            pass
+        time.sleep(2)
+        self.setup_driver()
 
     def is_valid_paipu_id(self, value):
         if not isinstance(value, str) or len(value) < 20:
@@ -1129,13 +1145,43 @@ class OptimizedPaipuExtractor:
                     print(f"[PlayerMode] 警告: player_href 不包含 '/player/'，跳過", file=sys.stderr)
                     continue
 
-                try:
-                    filtered_url = f"{player_href}/{room_number}"
-                    print(f"[PlayerMode]   構建的 filtered_url: {filtered_url}", file=sys.stderr)
-                    self.driver.get(filtered_url)
-                    time.sleep(1.0)
-                except Exception as e:
-                    print(f"[PlayerMode] 無法開啟玩家頁面 {player_name}: {e}", file=sys.stderr)
+                # Retry loop for player page navigation
+                max_retries = 2
+                success = False
+                
+                for retry in range(max_retries + 1):
+                    try:
+                        filtered_url = f"{player_href}/{room_number}"
+                        print(f"[PlayerMode]   構建的 filtered_url: {filtered_url}", file=sys.stderr)
+                        
+                        self.driver.get(filtered_url)
+                        time.sleep(1.5)
+                        
+                        # Check for common error text
+                        error_check = self.driver.execute_script("""
+                            var bodyText = document.body.innerText;
+                            return bodyText.includes('Error loading data') || 
+                                   bodyText.includes('500 Internal Server Error') ||
+                                   bodyText.includes('An error occurred');
+                        """)
+                        
+                        if error_check:
+                            raise Exception("Page displayed error message")
+                            
+                        success = True
+                        break
+                        
+                    except Exception as e:
+                        print(f"[PlayerMode] 無法開啟玩家頁面 {player_name} (嘗試 {retry+1}/{max_retries+1}): {e}", file=sys.stderr)
+                        
+                        if retry < max_retries:
+                            print(f"[PlayerMode] 嘗試重啟 Driver...", file=sys.stderr)
+                            self.restart_driver()
+                            time.sleep(1)
+                        else:
+                            print(f"[PlayerMode] 放棄此玩家", file=sys.stderr)
+
+                if not success:
                     continue
 
                 player_paipus = self.collect_all_paipus_on_player_page(existing_ids=seen_ids)

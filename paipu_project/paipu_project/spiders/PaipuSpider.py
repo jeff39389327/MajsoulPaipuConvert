@@ -587,6 +587,7 @@ def collect_paipus_by_date_room_player(config: CrawlerConfig, output_file=None) 
     """Collect paipus using date_room_player mode (逐玩家收集所有牌譜)"""
     all_paipus: List[str] = []
     interrupted = False
+    progress_file = "crawler_progress.json"
 
     # Setup interrupt handler
     def signal_handler(sig, frame):  # noqa: ARG001 - callback signature fixed by signal
@@ -603,12 +604,32 @@ def collect_paipus_by_date_room_player(config: CrawlerConfig, output_file=None) 
         start_date = datetime.strptime(config.start_date, "%Y-%m-%d")
         end_date = datetime.strptime(config.end_date, "%Y-%m-%d")
 
+        # Check for existing progress
+        if os.path.exists(progress_file):
+            try:
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    progress = json.load(f)
+                
+                if progress.get('mode') == 'date_room_player' and \
+                   progress.get('target_room') == config.target_room and \
+                   progress.get('end_date') == config.end_date:
+                    
+                    last_date_str = progress.get('last_processed_date')
+                    if last_date_str:
+                        last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
+                        if start_date <= last_date < end_date:
+                            print(f"\nFound progress file. Resuming from {last_date_str}...")
+                            start_date = last_date + timedelta(days=1)
+                            print(f"New start date: {start_date.strftime('%Y-%m-%d')}")
+            except Exception as e:
+                print(f"Error reading progress file: {e}")
+
         # Calculate total days
         total_days = (end_date - start_date).days + 1
         print(f"\n{'='*70}")
         print(f"Starting date_room_player mode collection")
         print(f"{'='*70}")
-        print(f"Date range: {config.start_date} to {config.end_date} (total {total_days} days)")
+        print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {config.end_date} (total {total_days} days)")
         print(f"Target room: {config.target_room}")
         print(f"Headless mode: {'Enabled' if config.headless_mode else 'Disabled'}")
         print(f"Fast mode: {' Enabled' if config.fast_mode else 'Disabled (complete)'}")
@@ -655,6 +676,22 @@ def collect_paipus_by_date_room_player(config: CrawlerConfig, output_file=None) 
                     all_paipus.append(paipu)
                     new_paipus += 1
 
+            # Save progress
+            try:
+                progress_data = {
+                    'mode': 'date_room_player',
+                    'target_room': config.target_room,
+                    'start_date': config.start_date,
+                    'end_date': config.end_date,
+                    'last_processed_date': date_str,
+                    'timestamp': time.time()
+                }
+                with open(progress_file, 'w', encoding='utf-8') as f:
+                    json.dump(progress_data, f, ensure_ascii=False, indent=2)
+                print(f"Progress saved: {date_str}")
+            except Exception as e:
+                print(f"Error saving progress: {e}")
+
             day_elapsed = time.time() - day_start
             total_elapsed = time.time() - start_time
 
@@ -683,6 +720,14 @@ def collect_paipus_by_date_room_player(config: CrawlerConfig, output_file=None) 
             print(f"date_room_player mode collection interrupted by user!")
         else:
             print(f"date_room_player mode collection completed!")
+            # Clean up progress file on completion
+            if os.path.exists(progress_file):
+                try:
+                    os.remove(progress_file)
+                    print("Progress file removed (task completed)")
+                except:
+                    pass
+
         print(f"{'='*70}")
         print(f"Total collected: {len(all_paipus)} unique paipu IDs")
         print(f"Days processed: {day_count} days")
