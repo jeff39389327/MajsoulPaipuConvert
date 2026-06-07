@@ -11,6 +11,9 @@ from google.protobuf import json_format
 
 # 添加 tensoul-py-ng 路徑
 sys.path.append('tensoul-py-ng')
+# 可攜式補丁 (繞過 error 151 + 自動建立 ms_cfg.json)；必須在 import tensoul 前 ensure_ms_cfg
+import ms_patch
+ms_patch.ensure_ms_cfg()
 from tensoul import MajsoulPaipuDownloader
 import ms.protocol_pb2 as pb
 
@@ -226,8 +229,9 @@ async def fetch_raw_timing_data(record_uuid, downloader):
     try:
         req = pb.ReqGameRecord()
         req.game_uuid = record_uuid
-        req.client_version_string = f'web-{downloader.version_to_force}'
-        
+        # PATCH: 舊 'web-{version}' 會回 error 151，改用可攜式補丁的正確版本字串
+        req.client_version_string = ms_patch.MS_CLIENT_VERSION_STRING
+
         res = await downloader.lobby.fetch_game_record(req)
         
         if res.error.code:
@@ -352,7 +356,8 @@ async def main():
     # 初始化 tensoul downloader 並登入
     async with MajsoulPaipuDownloader() as downloader:
         print("登入雀魂...")
-        await downloader.login(username, password)
+        await ms_patch.login(downloader, username, password)   # 可攜式登入 (繞過 151)
+        ms_patch.patch_downloader(downloader)                  # 下載也用正確版本字串
         print("登入成功！")
         
         with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:

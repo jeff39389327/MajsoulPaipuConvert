@@ -20,6 +20,7 @@ __pycache__/
 
 # 環境相關
 venv/
+.venv/
 env/
 config.env
 
