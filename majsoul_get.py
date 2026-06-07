@@ -29,6 +29,7 @@ async def run(uuids, base_dir):
     password = os.getenv("ms_password", "")
     collect_timing = os.getenv("COLLECT_TIMING", "true").lower() == "true"
     save_raw = os.getenv("SAVE_RAW_JSON", "false").lower() == "true"
+    save_debug = os.getenv("SAVE_DEBUG", "false").lower() == "true"
     if save_raw:
         collect_timing = True
     for d in (base_dir, os.path.join(base_dir, "tenhou"),
@@ -55,7 +56,7 @@ async def run(uuids, base_dir):
                 print("  ✗ 下載失敗 (牌譜不存在或無權限)")
                 continue
             print(f"  ✓ 下載成功，局數={len(log.get('log', []))} 玩家={log.get('name')}")
-            await T.process_log(u, log, base_dir, timing, full, False, save_raw)
+            await T.process_log(u, log, base_dir, timing, full, save_debug, save_raw)
             print(f"  ✓ 已轉換寫出 {base_dir}/{{tenhou,mjai}}/")
             ok += 1
         print(f"\n完成 {ok}/{len(uuids)}")

@@ -227,10 +227,8 @@ async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, ful
 async def fetch_raw_timing_data(record_uuid, downloader):
     """獲取原始思考時間數據和完整牌譜記錄"""
     try:
-        req = pb.ReqGameRecord()
-        req.game_uuid = record_uuid
-        # PATCH: 舊 'web-{version}' 會回 error 151，改用可攜式補丁的正確版本字串
-        req.client_version_string = ms_patch.MS_CLIENT_VERSION_STRING
+        # PATCH: 舊 'web-{version}' 會回 error 151，改用可攜式補丁的共用 builder
+        req = ms_patch.build_game_record_req(record_uuid)
 
         res = await downloader.lobby.fetch_game_record(req)
         
