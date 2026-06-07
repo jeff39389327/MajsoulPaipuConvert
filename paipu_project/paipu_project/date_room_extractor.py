@@ -14,8 +14,14 @@ import shutil
 import random
 import sys
 import io
+import logging
 
 from datetime import datetime
+
+# selenium 的 remote_connection logger 在 DEBUG 等級會把每個 WebDriver 指令（含整段注入 JS）
+# 印出來，形成 MB 級洪流灌爆 GUI 前端（拖垮主執行緒、取消鈕點不動）。提到 WARNING 止血。
+for _noisy_logger in ("selenium", "selenium.webdriver.remote.remote_connection", "urllib3"):
+    logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
 # 強制設定 stdout 和 stderr 為 UTF-8 編碼
 if sys.stdout.encoding != 'utf-8':

@@ -17,6 +17,15 @@ import tempfile
 import signal
 import random
 import traceback
+import logging
+
+# selenium 的 remote_connection logger 在 DEBUG 等級會把「每一個」WebDriver 指令（含整段
+# getAttribute 注入 JS，單筆數 KB）印出來。scrapy 預設 LOG_LEVEL=DEBUG，會讓它噴出 MB 級
+# 洪流，經由 GUI 逐行轉送到 renderer 並無上限累加進 DOM，拖垮前端主執行緒、導致「取消」鈕
+# 點不動、進度/狀態也更新不了。將 selenium / urllib3 logger 提到 WARNING 以止血（不影響
+# 我們自己的 print 進度輸出）。
+for _noisy_logger in ("selenium", "selenium.webdriver.remote.remote_connection", "urllib3"):
+    logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
 @dataclass
 class CrawlerConfig:
@@ -703,6 +712,11 @@ def get_top_players_urls(config: CrawlerConfig):
                 driver.execute_script("arguments[0].click();", radio_button)
                 print(f"Clicked {period} time period")
 
+                # 切換時間段會觸發 React 重新抓取榜單，舊表會先被卸載 (玩家連結瞬間歸零)。
+                # 先沉澱片刻讓舊內容消失，再由 extract_positive_ranking_players 等新榜單
+                # 渲染完成；否則會在空表上抓取而收集到 0 筆。
+                time.sleep(1.5)
+
                 # Save verification screenshot
                 if config.save_screenshots:
                     rank_suffix = "_".join(config.ranks).lower()
@@ -752,65 +766,45 @@ def get_top_players_urls(config: CrawlerConfig):
         print("Chrome instance closed")
 
 def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
-    """Extract player links from Positive ranking column"""
+    """Extract player links from the 'Positive ranking' column.
+
+    delta 排行榜頁渲染三欄 MuiGrid（Negative / Positive / Stamina ranking），每欄是一個
+    <h5> 標題後接一張玩家連結表。重點：切換時間段 radio 後 React 會卸載並重抓榜單，玩家
+    連結會瞬間歸零（見過往「Method 3 found 0」即此故），故**必須先等連結重新渲染**再抓，
+    否則讀到空表收集 0 筆。鎖定 Positive 欄的方式：用 <h5> 標題文字定位，取其父層 grid
+    item（恰好只包這一欄）內的 /player/ 連結——避免抓到 Negative 欄（輸最多的人）。
+    """
     player_urls = []
 
     try:
         print(f"Starting to find player links in Positive ranking column for time period {period}...")
 
-        # Method 1: Try to find player links in Positive ranking column
-        player_links_in_positive = []
-
+        # 等榜單（任一玩家連結）重新渲染完成
         try:
-            positive_heading = driver.find_element(By.XPATH, "//*[contains(text(), 'Positive ranking')]")
-            print("Found Positive ranking heading")
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/player/']"))
+            )
+        except Exception:
+            print("Timed out waiting for player links to render after period switch")
 
-            positive_container = positive_heading.find_element(By.XPATH, "./following-sibling::*[1] | ./parent::*/following-sibling::*[1]")
-
-            container_links = positive_container.find_elements(By.CSS_SELECTOR, "a[href*='/player/']")
-            player_links_in_positive.extend(container_links)
-            print(f"Found {len(container_links)} player links in Positive ranking container")
-
+        # 以 'Positive ranking' 標題定位該欄，取其父 grid item 內的玩家連結
+        player_links_in_positive = []
+        try:
+            positive_heading = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//h5[normalize-space(.)='Positive ranking']")
+                )
+            )
+            positive_column = positive_heading.find_element(By.XPATH, "./parent::*")
+            player_links_in_positive = positive_column.find_elements(
+                By.CSS_SELECTOR, "a[href*='/player/']"
+            )
+            print(f"Found {len(player_links_in_positive)} player links in Positive ranking column")
         except Exception as e:
-            print(f"Method 1 failed: {e}")
-
-        # Method 2: If method 1 fails, try to locate through page layout
-        if not player_links_in_positive:
-            try:
-                print("Trying method 2: Locating Positive ranking through page layout...")
-
-                all_player_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/player/']")
-
-                size = driver.get_window_size()
-                for link in all_player_links:
-                    try:
-                        location = link.location
-
-                        if size['width'] * 0.33 < location['x'] < size['width'] * 0.66:
-                            player_links_in_positive.append(link)
-                    except Exception:
-                        continue
-
-                print(f"Method 2 found {len(player_links_in_positive)} possible Positive ranking links")
-
-            except Exception as e:
-                print(f"Method 2 also failed: {e}")
-
-        # Method 3: If both methods fail, get all player links and filter
-        if not player_links_in_positive:
-            print("Trying method 3: Getting all player links...")
-            all_links = driver.find_elements(By.TAG_NAME, "a")
-            for link in all_links:
-                href = link.get_attribute("href")
-                if href and "/player/" in href:
-                    player_links_in_positive.append(link)
-
-            print(f"Method 3 found {len(player_links_in_positive)} player links")
-            if len(player_links_in_positive) >= 60:
-                start_idx = len(player_links_in_positive) // 3
-                end_idx = start_idx + config.max_players_per_period
-                player_links_in_positive = player_links_in_positive[start_idx:end_idx]
-                print(f"After filtering, kept {len(player_links_in_positive)} Positive ranking links")
+            # 退路：找不到標題（版面再次改版時）就抓全部連結，至少不空手而回
+            print(f"Could not isolate Positive ranking column ({e}); falling back to all player links")
+            player_links_in_positive = driver.find_elements(By.CSS_SELECTOR, "a[href*='/player/']")
+            print(f"Fallback collected {len(player_links_in_positive)} player links (may include other columns)")
 
         # Extract specified number of unique player URLs
         seen_players = set()
