@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   writeCrawler: (cfg) => ipcRenderer.invoke('config:writeCrawler', cfg),
 
   // job 控制
-  startJob: (kind, params, dryRun) => ipcRenderer.invoke('job:start', { kind, params, dryRun }),
+  startJob: (kind, params) => ipcRenderer.invoke('job:start', { kind, params }),
   cancelJob: () => ipcRenderer.invoke('job:cancel'),
 
   // 事件訂閱 (回傳取消訂閱函式)

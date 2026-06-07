@@ -32,10 +32,25 @@ function onJobEvent(cb) {
   return () => jobHandlers.delete(cb);
 }
 
+// log 轉送可能極高頻（如 scrapy/selenium DEBUG 洪流）。若每行都直接寫 DOM 並無上限累加，
+// renderer 主執行緒會被拖垮，導致「取消」鈕點不動、狀態也更新不了。對策：(1) 緩衝字串設上限，
+// (2) 用 requestAnimationFrame 把多次寫入合併成每幀一次 DOM 更新，讓事件迴圈保持可回應點擊。
+const LOG_MAX_CHARS = 200000;
+let logBuffer = '';
+let logFlushScheduled = false;
 function appendLog(text) {
-  const drawer = document.getElementById('log-drawer');
-  drawer.textContent += text.endsWith('\n') ? text : text + '\n';
-  drawer.scrollTop = drawer.scrollHeight;
+  logBuffer += text.endsWith('\n') ? text : text + '\n';
+  if (logBuffer.length > LOG_MAX_CHARS) {
+    logBuffer = logBuffer.slice(logBuffer.length - LOG_MAX_CHARS);
+  }
+  if (logFlushScheduled) return;
+  logFlushScheduled = true;
+  requestAnimationFrame(() => {
+    logFlushScheduled = false;
+    const drawer = document.getElementById('log-drawer');
+    drawer.textContent = logBuffer;
+    drawer.scrollTop = drawer.scrollHeight;
+  });
 }
 
 function setStatus(status) {
@@ -48,7 +63,7 @@ function setStatus(status) {
 
 // 啟動 job 並回傳 Promise。終止路徑有三：done 事件、startJob 回傳 false、或後端在未發出
 // done 前就 py:exit（取消/匯入期崩潰）。任一路徑都會解除訂閱並 resolve，避免殘留 handler。
-function runJob(kind, params, dryRun, onEvent) {
+function runJob(kind, params, onEvent) {
   return new Promise((resolve) => {
     setStatus('running');
     let settled = false;
@@ -74,7 +89,7 @@ function runJob(kind, params, dryRun, onEvent) {
       if (state.jobStatus === 'running') setStatus(info && info.code === 0 ? 'done' : 'error');
       finish({ type: 'done', ok: false, viaExit: true });
     });
-    window.api.startJob(kind, params || {}, !!dryRun).then((ok) => {
+    window.api.startJob(kind, params || {}).then((ok) => {
       if (!ok) {
         setStatus('error');
         finish({ type: 'done', ok: false });
@@ -101,7 +116,7 @@ async function refreshConfig() {
 
 async function runDoctor() {
   let result = null;
-  await runJob('doctor', {}, false, (ev) => {
+  await runJob('doctor', {}, (ev) => {
     if (ev.type === 'stage_done' && ev.stage === 'doctor') result = ev.stats;
   });
   state.doctor = result;

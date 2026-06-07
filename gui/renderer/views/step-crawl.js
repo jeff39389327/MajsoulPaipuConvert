@@ -1,5 +1,5 @@
 // step-crawl —— 執行 Stage 1（爬牌譜 ID）。不定量進度 + 可取消 + 完成後自動接到下載。
-import { h, toggle } from './dom.js';
+import { h } from './dom.js';
 import { buildConfig } from './step-mode.js';
 
 export function renderCrawl(ctx, container) {
@@ -20,11 +20,8 @@ export function renderCrawl(ctx, container) {
   const result = h('div');
   container.append(result);
 
-  let dryRun = false;
-  const dryToggle = toggle('dry-run', false, (v) => (dryRun = v));
-
   const startBtn = h('button', { class: 'primary' }, t('btn.start'));
-  const actions = h('div', { class: 'actions' }, startBtn, dryToggle);
+  const actions = h('div', { class: 'actions' }, startBtn);
   container.append(actions);
 
   // 訂閱 job 事件（離開此 view 時取消）
@@ -54,7 +51,7 @@ export function renderCrawl(ctx, container) {
     bar.classList.add('indeterminate');
     label.textContent = t('status.running');
     await ctx.api.writeCrawler(buildConfig(form));
-    await ctx.runJob('crawl', { config: buildConfig(form) }, dryRun);
+    await ctx.runJob('crawl', { config: buildConfig(form) });
     bar.classList.remove('indeterminate');
   };
 

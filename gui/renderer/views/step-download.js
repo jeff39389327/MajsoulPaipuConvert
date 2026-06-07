@@ -1,5 +1,5 @@
 // step-download —— 執行 Stage 2（並行下載 + mjai 轉換），雙進度條 + 即時摘要。
-import { h, toggle } from './dom.js';
+import { h } from './dom.js';
 
 export function renderDownload(ctx, container) {
   const { t, state } = ctx;
@@ -22,10 +22,8 @@ export function renderDownload(ctx, container) {
   container.append(result);
 
   let total = 0;
-  let dryRun = false;
-  const dryToggle = toggle('dry-run', false, (v) => (dryRun = v));
   const startBtn = h('button', { class: 'primary' }, t('btn.start'));
-  container.append(h('div', { class: 'actions' }, startBtn, dryToggle));
+  container.append(h('div', { class: 'actions' }, startBtn));
 
   const setBar = (bar, done, tot) => {
     const pct = tot ? Math.round((done / tot) * 100) : 0;
@@ -62,7 +60,7 @@ export function renderDownload(ctx, container) {
     label.textContent = t('status.running');
     const params = {};
     if (state.crawlOutputFile) params.input_list = state.crawlOutputFile;
-    await ctx.runJob('download', params, dryRun);
+    await ctx.runJob('download', params);
   };
 
   return off;
