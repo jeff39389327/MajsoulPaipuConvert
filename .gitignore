@@ -27,5 +27,9 @@ config.env
 # 第三方庫
 tensoul-py-ng/
 
+# GUI 打包產物 (electron-builder 輸出於 repo 根的 dist_gui/)
+dist_gui/
+node_modules/
+
 # Augment AI
 .augment/

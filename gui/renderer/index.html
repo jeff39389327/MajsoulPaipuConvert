@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+    <title>MajsoulPaipuGUI</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <div class="brand">
+          <div class="brand-title" data-i18n="app.title">雀魂牌譜下載工具</div>
+          <div class="brand-sub" data-i18n="app.subtitle"></div>
+        </div>
+        <nav id="nav"></nav>
+        <div id="env-badge" class="env-badge"></div>
+      </aside>
+      <main id="main">
+        <section id="view"></section>
+      </main>
+    </div>
+
+    <footer id="statusbar">
+      <span id="status-text" class="status idle"></span>
+      <div class="spacer"></div>
+      <button id="log-toggle" class="ghost"></button>
+      <button id="cancel-btn" class="danger" hidden></button>
+    </footer>
+    <pre id="log-drawer" hidden></pre>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

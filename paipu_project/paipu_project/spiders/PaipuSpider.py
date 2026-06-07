@@ -343,10 +343,26 @@ if __name__ == "__main__":
         player_mode=str(player_mode)
     )
 
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
-        temp_file.write(temp_script)
-        temp_file_path = temp_file.name
+    # 凍結 (PyInstaller) 模式下，sys.executable 是 backend.exe 而非 python，且沒有
+    # 外部 python 可跑臨時 .py。改為自我再入 `backend.exe __extractor <args>`，由
+    # gui.backend.cli 執行同一個 OptimizedPaipuExtractor 並把 UUID 印到 stdout。
+    frozen = getattr(sys, 'frozen', False)
+    temp_file_path = None
+    if frozen:
+        cmd = [
+            sys.executable, '__extractor',
+            '--target-date', target_date,
+            '--target-room', target_room,
+            '--headless', str(headless_mode),
+            '--fast', str(fast_mode),
+            '--player-mode', str(player_mode),
+        ]
+    else:
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
+            temp_file.write(temp_script)
+            temp_file_path = temp_file.name
+        cmd = [sys.executable, '-u', temp_file_path]  # -u for unbuffered output
 
     try:
         # Execute temporary script with real-time output
@@ -356,7 +372,7 @@ if __name__ == "__main__":
         env['PYTHONIOENCODING'] = 'utf-8'
 
         process = subprocess.Popen(
-            [sys.executable, '-u', temp_file_path],  # -u for unbuffered output
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # Merge stderr to stdout for unified output
             text=True,
@@ -400,11 +416,12 @@ if __name__ == "__main__":
         return paipu_ids
 
     finally:
-        # Delete temporary file
-        try:
-            os.unlink(temp_file_path)
-        except Exception:
-            pass
+        # Delete temporary file (dev mode only; frozen mode writes no temp script)
+        if temp_file_path:
+            try:
+                os.unlink(temp_file_path)
+            except Exception:
+                pass
 
 
 def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None, player_mode: bool = False) -> List[str]:

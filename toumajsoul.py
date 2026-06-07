@@ -135,7 +135,7 @@ def inject_timing_to_mjai(mjai_file, timing_map, debug=False):
         for line in output_lines:
             f.write(line + '\n')
 
-async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, full_record=None, save_debug=False, save_raw_json=False):
+async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, full_record=None, save_debug=False, save_raw_json=False, mjai_semaphore=None):
     # 建立目錄
     mjai_dir = os.path.join(base_dir, "mjai")
     tenhou_dir = os.path.join(base_dir, "tenhou")
@@ -167,12 +167,24 @@ async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, ful
         return
 
     # 轉換為 mjai 格式
+    # mjai-reviewer 可由環境變數覆寫路徑 (凍結版指向內建的 mjai-reviewer.exe 絕對路徑)。
+    # mjai_semaphore (若提供) 限制同時並發的轉換數，讓 GUI 能並行轉換多個牌譜。
     try:
-        mjai_cmd = f'mjai-reviewer --no-review -i {temp_file} --mjai-out temp_logs/{record_uuid}_mjai.json'
-        mjai_result = subprocess.run(mjai_cmd, shell=True, capture_output=True, text=True)
-        if mjai_result.returncode != 0:
+        mjai_bin = os.environ.get("MJAI_REVIEWER_BIN", "mjai-reviewer")
+        mjai_cmd = f'"{mjai_bin}" --no-review -i {temp_file} --mjai-out temp_logs/{record_uuid}_mjai.json'
+        # 用一個不限量的 Semaphore 當作「無限制」的 fallback，避免 nullcontext 在
+        # Python 3.8/3.9 不支援 async with 的問題。
+        sem = mjai_semaphore if mjai_semaphore is not None else asyncio.Semaphore(2 ** 31)
+        async with sem:
+            proc = await asyncio.create_subprocess_shell(
+                mjai_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr_data = await proc.communicate()
+        if proc.returncode != 0:
             print(f"Warning: mjai conversion failed for {record_uuid}")
-            print(f"Error: {mjai_result.stderr}")
+            print(f"Error: {stderr_data.decode('utf-8', errors='replace')}")
     except Exception as e:
         print(f"Error executing mjai-reviewer: {str(e)}")
 
