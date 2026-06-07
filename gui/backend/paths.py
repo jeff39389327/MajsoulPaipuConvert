@@ -49,7 +49,16 @@ def work_dir(params: dict | None = None) -> Path:
 
 
 def inner_dir(params: dict | None = None) -> Path:
-    """Stage 1 scrapy 的執行目錄 (inner package dir)。"""
+    """Stage 1 scrapy 的執行目錄（放 crawler_config.json 與輸出檔的可寫位置）。
+
+    dev：repo 內的 inner package dir（spider 透過 CWD 相對路徑載入 date_room_extractor，
+         crawler_config.json 也在此）。
+    凍結：repo_root 位於唯讀的 process.resourcesPath 底下，不可寫；spider/extractor/settings
+         皆已 bundle 進 backend.exe（import 不依賴 CWD），故改用使用者選定、可寫的 work_dir。
+         crawler_config.json 與爬取輸出都落在 work_dir，Stage 2 的銜接也指向 work_dir 內的檔案。
+    """
+    if bridge.is_frozen():
+        return work_dir(params)
     return repo_root(params) / "paipu_project" / "paipu_project"
 
 

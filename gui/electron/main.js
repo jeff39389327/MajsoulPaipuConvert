@@ -45,10 +45,14 @@ function saveSettings(s) {
 let settings = null;
 
 // 由設定推導出關鍵路徑。
+// 凍結版的 repoRoot 位於唯讀的 process.resourcesPath 底下，crawler_config.json 與爬取
+// 輸出須改放使用者選定、可寫的 workDir；spider/extractor 已 bundle，不依賴 inner package 目錄。
 function derivePaths() {
   const repoRoot = settings.repoRoot || REPO_ROOT;
   const workDir = settings.workDir || repoRoot;
-  const innerDir = path.join(repoRoot, 'paipu_project', 'paipu_project');
+  const innerDir = isPackaged()
+    ? workDir
+    : path.join(repoRoot, 'paipu_project', 'paipu_project');
   return { repoRoot, workDir, innerDir };
 }
 

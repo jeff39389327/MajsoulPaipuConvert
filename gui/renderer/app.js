@@ -46,24 +46,38 @@ function setStatus(status) {
   document.getElementById('cancel-btn').hidden = status !== 'running';
 }
 
-// 啟動 job 並回傳 Promise（於 done 或 exit 時 resolve）。onEvent 收到每個 py:event。
+// 啟動 job 並回傳 Promise。終止路徑有三：done 事件、startJob 回傳 false、或後端在未發出
+// done 前就 py:exit（取消/匯入期崩潰）。任一路徑都會解除訂閱並 resolve，避免殘留 handler。
 function runJob(kind, params, dryRun, onEvent) {
   return new Promise((resolve) => {
     setStatus('running');
-    const off = onJobEvent((ev) => {
+    let settled = false;
+    let offEvent = null;
+    let offExit = null;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (offEvent) offEvent();
+      if (offExit) offExit();
+      resolve(result);
+    };
+    offEvent = onJobEvent((ev) => {
       if (onEvent) onEvent(ev);
       if (ev.type === 'error' && ev.fatal) setStatus('error');
       if (ev.type === 'done') {
-        off();
         if (state.jobStatus !== 'error') setStatus(ev.ok ? 'done' : 'error');
-        resolve(ev);
+        finish(ev);
       }
+    });
+    // 後端程序退出但未發出 done -> 視為終止（done 已先 finish 時，offExit 已被解除，不會誤觸）
+    offExit = window.api.onExit((info) => {
+      if (state.jobStatus === 'running') setStatus(info && info.code === 0 ? 'done' : 'error');
+      finish({ type: 'done', ok: false, viaExit: true });
     });
     window.api.startJob(kind, params || {}, !!dryRun).then((ok) => {
       if (!ok) {
-        off();
         setStatus('error');
-        resolve({ type: 'done', ok: false });
+        finish({ type: 'done', ok: false });
       }
     });
   });
@@ -184,9 +198,7 @@ async function bootstrap() {
   window.api.onEvent((ev) => jobHandlers.forEach((fn) => fn(ev)));
   window.api.onStderr((s) => appendLog(s));
   window.api.onRaw((line) => appendLog(line));
-  window.api.onExit(() => {
-    if (state.jobStatus === 'running') setStatus('idle');
-  });
+  // 註：job 退出由 runJob 內的 onExit 處理（終止 + 解除訂閱），此處不再全域攔截，避免競態。
 
   // log 抽屜
   const drawer = document.getElementById('log-drawer');
