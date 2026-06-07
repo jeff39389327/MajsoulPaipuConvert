@@ -58,13 +58,31 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path gui/vendor | Out-Null
           New-Item -ItemType Directory -Force -Path mjai_tmp | Out-Null
-          gh release download --repo $env:MJAI_REPO --pattern "*windows*.zip" --dir mjai_tmp
-          $zip = Get-ChildItem mjai_tmp -Filter *.zip | Select-Object -First 1
-          if ($null -eq $zip) { Write-Error "找不到 mjai-reviewer 的 Windows 版 zip 資產"; exit 1 }
-          Expand-Archive -Path $zip.FullName -DestinationPath mjai_tmp/extracted -Force
-          $exe = Get-ChildItem mjai_tmp/extracted -Recurse -Filter mjai-reviewer.exe | Select-Object -First 1
-          if ($null -eq $exe) { Write-Error "解壓後找不到 mjai-reviewer.exe"; exit 1 }
+          # mjai-reviewer 的 release 全部標記為 prerelease，`gh release download`（取 latest）
+          # 會回 "release not found"。改用 API 列出所有 release，挑最新一個含 Windows zip 的資產。
+          $headers = @{
+            'User-Agent'    = 'gh-actions'
+            'Accept'        = 'application/vnd.github+json'
+            'Authorization' = "Bearer $env:GH_TOKEN"
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:MJAI_REPO/releases?per_page=20"
+          $asset = $null
+          foreach ($r in $releases) {
+            $a = $r.assets | Where-Object { $_.name -match 'windows' -and $_.name -match '\.zip$' } | Select-Object -First 1
+            if ($a) { $asset = $a; break }
+          }
+          if ($null -eq $asset) { Write-Error "找不到 mjai-reviewer 的 Windows zip 資產"; exit 1 }
+          Write-Host "下載資產: $($asset.name)"
+          # browser_download_url 會轉址到 githubusercontent；下載本身不帶 Authorization（帶了會被拒）。
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mjai_tmp/mjai.zip
+          Expand-Archive -Path mjai_tmp/mjai.zip -DestinationPath mjai_tmp/extracted -Force
+          # 預編譯執行檔可能叫 mjai-reviewer.exe 或 akochan-reviewer.exe（mjai-reviewer 的前身），
+          # 對 `--no-review --mjai-out` 的純轉換用法相容；取任一 reviewer exe，統一命名為 mjai-reviewer.exe。
+          $exe = Get-ChildItem mjai_tmp/extracted -Recurse -Include 'mjai-reviewer.exe', 'akochan-reviewer.exe' | Select-Object -First 1
+          if ($null -eq $exe) { $exe = Get-ChildItem mjai_tmp/extracted -Recurse -Filter '*reviewer*.exe' | Select-Object -First 1 }
+          if ($null -eq $exe) { Write-Error "解壓後找不到 reviewer 執行檔"; exit 1 }
           Copy-Item $exe.FullName gui/vendor/mjai-reviewer.exe -Force
+          Write-Host "已放置 gui/vendor/mjai-reviewer.exe (來源: $($exe.Name))"
 
       - name: Backend smoke test (NDJSON protocol)
         shell: pwsh
