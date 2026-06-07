@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 一律使用**繁體中文**回覆使用者（程式碼、識別字與既有英文註解維持原樣）。
 
+## Git workflow
+
+Commit and push changes directly to `main`. Do **not** create feature branches or
+pull requests for changes in this repo — work straight on `main`.
+
 ## What this is
 
 A two-stage Windows/Python pipeline that scrapes Mahjong Soul (雀魂) game-log IDs from the
