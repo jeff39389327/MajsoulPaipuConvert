@@ -12,6 +12,13 @@ import os
 import subprocess
 import sys
 
+# Windows 預設 stdout 編碼為 cp1252，print 中文會 UnicodeEncodeError；強制 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 GUI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(GUI_DIR)
 SPEC = os.path.join(GUI_DIR, "build", "backend.spec")

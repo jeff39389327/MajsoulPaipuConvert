@@ -29,6 +29,15 @@ import os
 import sys
 from datetime import datetime, timezone
 
+# NDJSON 事件含非 ASCII（中文 msg 等）。Windows 上被 Electron spawn 時，stdout/stderr 是
+# 管道、預設用 cp1252 編碼，寫中文會 UnicodeEncodeError。強制 UTF-8（與 Electron 端 readline
+# 的 utf-8 解碼一致）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # 在任何 print 重導之前，保存真正的 stdout 給事件流使用。
 _EVENT_OUT = sys.stdout
 # 之後所有 print()（含 import 進來的既有模組）一律導向 stderr，保持 stdout 乾淨。
