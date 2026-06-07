@@ -80,10 +80,16 @@ for fname in ('cfg.json', 'ms_cfg.example.json', 'constants.py'):
         datas.append((src, 'tensoul'))
 
 # 把既有 repo 模組與 inner scrapy 專案、tensoul-py-ng 納入搜尋路徑。
+# 注意 scrapy 專案是雙層同名結構：外層 paipu_project/（放 scrapy.cfg、無 __init__.py）內含
+# 內層 paipu_project/（真正的套件，有 __init__.py）。要讓 import paipu_project 對應到內層
+# 套件、使 hiddenimport 'paipu_project.settings' / 'paipu_project.spiders.PaipuSpider' 能被
+# PyInstaller 解析並收進 bundle，**外層** dir 必須在 pathex 上（只放內層會讓 settings/spiders
+# 變成頂層模組，paipu_project 套件整個收不進來 -> frozen 後 ModuleNotFoundError: paipu_project）。
 pathex = [
     REPO_ROOT,
     TENSOUL_DIR,
-    os.path.join(REPO_ROOT, 'paipu_project', 'paipu_project'),
+    os.path.join(REPO_ROOT, 'paipu_project'),                   # 外層：讓 paipu_project 成為套件
+    os.path.join(REPO_ROOT, 'paipu_project', 'paipu_project'),  # 內層：date_room_extractor 以頂層模組被 import
 ]
 
 a = Analysis(
