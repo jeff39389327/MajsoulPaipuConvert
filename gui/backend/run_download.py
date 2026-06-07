@@ -51,18 +51,6 @@ def _bool_env(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() == "true"
 
 
-def _dry_run(params: dict, ids: list[str]) -> None:
-    """不登入、不下載，僅驗證事件序列。"""
-    bridge.stage_start("download")
-    sample = ids[:3] if ids else [f"24010{i}-aaaa-bbbb-cccc-dddd-eeeeeeeeeeee" for i in range(3)]
-    total = len(sample)
-    for n, uuid in enumerate(sample, 1):
-        bridge.progress("download", phase="download", done=n, total=total, uuid=uuid, ok=True)
-        bridge.progress("convert", phase="mjai", done=n, total=total, uuid=uuid, ok=True)
-    bridge.stage_done("download", downloaded=total, total=total)
-    bridge.done(ok=True)
-
-
 async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     import dotenv
 
@@ -158,10 +146,6 @@ def run(params: dict) -> None:
     work_dir = str(paths.work_dir(params))
     repo_root = str(paths.repo_root(params))
     paths.ensure_repo_on_syspath(params)
-
-    if bridge.has_flag("--dry-run"):
-        _dry_run(params, _read_id_list(params, work_dir))
-        return
 
     try:
         asyncio.run(_run_async(params, work_dir, repo_root))

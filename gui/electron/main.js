@@ -141,7 +141,7 @@ function registerIpc() {
     return configStore.writeCrawlerConfig(innerDir, cfg || {});
   });
 
-  ipcMain.handle('job:start', (_e, { kind, params, dryRun }) => {
+  ipcMain.handle('job:start', (_e, { kind, params }) => {
     const { repoRoot, workDir, innerDir } = derivePaths();
     const merged = Object.assign(
       { repo_root: repoRoot, work_dir: workDir, inner_dir: innerDir },
@@ -153,7 +153,7 @@ function registerIpc() {
       if (settings.convertConcurrency) merged.convert_concurrency = settings.convertConcurrency;
       merged.sequential_download = !!settings.sequentialDownload;
     }
-    return pyRunner.startJob(kind, { params: merged, dryRun, pythonPath: settings.pythonPath }, send);
+    return pyRunner.startJob(kind, { params: merged, pythonPath: settings.pythonPath }, send);
   });
 
   ipcMain.handle('job:cancel', () => pyRunner.cancelJob());

@@ -16,7 +16,7 @@ function isRunning() {
 }
 
 // 啟動一個 job。send(channel, payload) 用來把事件推給 renderer。
-// kind: 'crawl' | 'download' | 'doctor'；options: { params, dryRun, pythonPath, cwd }
+// kind: 'crawl' | 'download' | 'doctor'；options: { params, pythonPath, cwd }
 function startJob(kind, options, send) {
   if (current) {
     send('py:event', { type: 'error', code: 'BUSY', msg: 'a job is already running', fatal: true });
@@ -30,7 +30,6 @@ function startJob(kind, options, send) {
   }
 
   const args = [...backend.baseArgs, kind, '--params-stdin'];
-  if (options.dryRun) args.push('--dry-run');
 
   const child = spawn(backend.command, args, {
     cwd: options.cwd || backend.cwd,

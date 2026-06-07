@@ -38,23 +38,6 @@ def _write_config(params: dict) -> str:
     return str((paths.inner_dir(params) / output_filename).resolve())
 
 
-def _dry_run(params: dict, output_path: str) -> None:
-    """不啟動 scrapy/selenium，產生假 ID 驗證事件序列與檔案寫入。"""
-    cfg = params.get("config") or {}
-    bridge.stage_start("crawl", mode=cfg.get("crawler_mode", "auto"))
-    seen = set()
-    with open(output_path, "a", encoding="utf-8") as out:
-        for i in range(5):
-            fake = f"24010{i}-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-            if fake not in seen:
-                seen.add(fake)
-                out.write(fake + "\n")
-                out.flush()
-                bridge.progress("crawl", unit="id", count=len(seen), total=None, current=fake)
-    bridge.stage_done("crawl", collected=len(seen), output_file=output_path)
-    bridge.done(ok=True)
-
-
 def _run_scrapy_cli(params: dict, output_path: str) -> None:
     """dev 模式：以子程序執行 `scrapy crawl paipu_spider`，解析 stdout 統計進度。"""
     cfg = params.get("config") or {}
@@ -62,8 +45,11 @@ def _run_scrapy_cli(params: dict, output_path: str) -> None:
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    # 以「正在跑後端的同一個 Python」呼叫 scrapy：GUI 用 .venv/Scripts/python.exe 啟動本
+    # 程序，但 venv 的 Scripts/ 不在 PATH 上，裸 `scrapy` 會 FileNotFoundError。-m scrapy
+    # 必用該直譯器的 scrapy，與其相依一致。(此分支僅 dev 模式走到，sys.executable 即 venv python。)
     proc = subprocess.Popen(
-        ["scrapy", "crawl", "paipu_spider"],
+        [sys.executable, "-m", "scrapy", "crawl", "paipu_spider"],
         cwd=str(paths.inner_dir(params)),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -128,9 +114,7 @@ def _run_scrapy_frozen(params: dict, output_path: str) -> None:
 def run(params: dict) -> None:
     output_path = _write_config(params)
     try:
-        if bridge.has_flag("--dry-run"):
-            _dry_run(params, output_path)
-        elif bridge.is_frozen():
+        if bridge.is_frozen():
             _run_scrapy_frozen(params, output_path)
         else:
             _run_scrapy_cli(params, output_path)
