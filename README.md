@@ -194,6 +194,30 @@ mahjong_logs/
 validate_logs.exe mahjong_logs/mjai
 ```
 
+## CI / Testing
+
+A GitHub Actions workflow (`.github/workflows/pipeline.yml`) exercises the pipeline
+**without exposing any credentials**:
+
+- **`offline`** (always runs): rebuilds the environment via `scripts/setup_env.sh`
+  (`SKIP_CHROME=1`), then runs `tests/test_pipeline.py` — tenhou→MJAI conversion on a
+  bundled de-identified fixture, the `think_ms` injection lock-step logic, and crawler
+  config validation. No Mahjong Soul account required.
+- **`e2e-live`** (runs only when secrets are present, on push / manual dispatch):
+  full spider → download → MJAI conversion end-to-end.
+
+The live job reads the account from **GitHub Secrets**, not from a committed file. To
+enable it, add repository secrets `MS_USERNAME` and `MS_PASSWORD` (Settings → Secrets and
+variables → Actions). `config.env` is written at runtime, stays gitignored, and is never
+printed; pull requests (especially from forks) cannot access the secrets, so credentials
+are never exposed.
+
+You can also rebuild the whole toolchain locally with:
+
+```bash
+bash scripts/setup_env.sh   # deps, tensoul-py-ng, Chrome+chromedriver, mjai-reviewer, config.env
+```
+
 ## Thinking Time Data
 
 When `COLLECT_TIMING=true`, MJAI output includes `think_ms` field:

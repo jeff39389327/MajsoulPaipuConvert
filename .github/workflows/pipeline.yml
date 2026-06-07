@@ -1,0 +1,164 @@
+name: pipeline
+
+# 測試「整個流程」，且不曝露 .env：
+#   - offline   ：一律執行。建置環境(不含 Chrome) + 用內附去識別化牌譜跑
+#                 tenhou->mjai 轉換 + 思考時間注入邏輯 + 爬蟲設定驗證。完全免帳密。
+#   - e2e-live  ：僅在 repo 設有 Secrets (MS_USERNAME / MS_PASSWORD) 時才跑，於
+#                 push / 手動觸發。憑證只從加密 Secrets 注入到執行期暫存的 config.env
+#                 (gitignore、永不 echo)，PR(尤其 fork) 取不到 Secrets，故不會外洩。
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # 釘選 mjai-reviewer 版本：兼作建置快取鍵，確保 CI 可重現。
+  MJAI_REVIEWER_VERSION: v1.5.10
+
+jobs:
+  # ---------------------------------------------------------------------------
+  offline:
+    name: 離線管線測試 (免帳密)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 快取 cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ env.MJAI_REVIEWER_VERSION }}
+
+      - name: 快取 mjai-reviewer 二進位
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/mjai-reviewer
+          key: mjai-reviewer-${{ runner.os }}-${{ env.MJAI_REVIEWER_VERSION }}
+
+      - name: 建置環境 (SKIP_CHROME)
+        env:
+          SKIP_CHROME: "1"
+        run: bash scripts/setup_env.sh
+
+      - name: 將 ~/.local/bin 加入 PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: 安裝 pytest
+        run: pip install -q pytest
+
+      - name: 執行離線測試
+        run: python -m pytest tests/test_pipeline.py -v
+
+  # ---------------------------------------------------------------------------
+  # 偵測是否設有帳密 Secrets（無法在 job 層 if 直接引用 secrets，故用獨立 job 輸出旗標）。
+  guard:
+    name: 檢查是否具備帳密 Secrets
+    runs-on: ubuntu-latest
+    outputs:
+      has_secrets: ${{ steps.check.outputs.has_secrets }}
+    steps:
+      - id: check
+        env:
+          MS_USERNAME: ${{ secrets.MS_USERNAME }}
+        run: |
+          if [ -n "$MS_USERNAME" ]; then
+            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未設定 MS_USERNAME / MS_PASSWORD Secrets，略過線上端到端測試。"
+          fi
+
+  # ---------------------------------------------------------------------------
+  e2e-live:
+    name: 線上端到端 (spider -> 下載 -> mjai)
+    runs-on: ubuntu-latest
+    needs: [offline, guard]
+    # 僅在有 Secrets 且非 pull_request 事件時執行（PR/fork 取不到 Secrets）。
+    if: ${{ needs.guard.outputs.has_secrets == 'true' && github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 快取 cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ env.MJAI_REVIEWER_VERSION }}
+
+      - name: 快取 mjai-reviewer 二進位
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/mjai-reviewer
+          key: mjai-reviewer-${{ runner.os }}-${{ env.MJAI_REVIEWER_VERSION }}
+
+      - name: 建置完整環境 (含 Chrome)
+        run: bash scripts/setup_env.sh
+
+      - name: 將 ~/.local/bin 加入 PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: 由 Secrets 寫入 config.env (不 echo 內容)
+        env:
+          MS_USERNAME: ${{ secrets.MS_USERNAME }}
+          MS_PASSWORD: ${{ secrets.MS_PASSWORD }}
+        run: |
+          umask 077
+          {
+            echo "ms_username=$MS_USERNAME"
+            echo "ms_password=$MS_PASSWORD"
+            echo "COLLECT_TIMING=true"
+            echo "SAVE_RAW_JSON=false"
+          } > config.env
+
+      - name: Stage 1 — spider 取得對局 UUID
+        run: |
+          cat > paipu_project/paipu_project/crawler_config.json <<'JSON'
+          {
+            "crawler_mode": "manual",
+            "manual_player_urls": ["https://amae-koromo.sapk.ch/player/69951433/12"],
+            "paipu_limit": 5,
+            "output_filename": "date_room_list.txt",
+            "headless_mode": true,
+            "save_screenshots": false
+          }
+          JSON
+          ( cd paipu_project/paipu_project && rm -f date_room_list.txt && scrapy crawl paipu_spider )
+          UUID="$(head -n1 paipu_project/paipu_project/date_room_list.txt)"
+          if [ -z "$UUID" ]; then
+            echo "::error::spider 未取得任何對局 UUID（amae-koromo 可能暫時無法存取）"
+            exit 1
+          fi
+          echo "取得 UUID: $UUID"
+          echo "$UUID" > tonpuulist.txt
+
+      - name: Stage 2 — 下載並轉換為 mjai
+        run: python toumajsoul.py
+
+      - name: 驗證產出
+        run: |
+          python - <<'PY'
+          import glob, gzip, json, sys
+          tenhou = glob.glob("mahjong_logs/tenhou/*.json")
+          mjai = glob.glob("mahjong_logs/mjai/*.json.gz")
+          assert tenhou, "未產生 tenhou 輸出"
+          assert mjai, "未產生 mjai 輸出"
+          with gzip.open(mjai[0], "rt", encoding="utf-8") as f:
+              first = json.loads(f.readline())
+          assert first["type"] == "start_game", f"mjai 首事件非 start_game: {first}"
+          print(f"驗證通過 — tenhou={tenhou} mjai={mjai}")
+          PY

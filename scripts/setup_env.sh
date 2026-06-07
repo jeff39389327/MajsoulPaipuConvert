@@ -40,36 +40,43 @@ if [ ! -d tensoul-py-ng ]; then
   git clone --depth 1 https://github.com/unStatiK/tensoul-py-ng.git tensoul-py-ng
 fi
 
-echo ">>> [3/6] 安裝 Google Chrome (Selenium 爬蟲所需)"
-if ! command -v google-chrome >/dev/null 2>&1; then
-  curl -sL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-  apt-get install -y -q /tmp/chrome.deb
-fi
-CHROME_VER="$(google-chrome --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')"
-echo "    Chrome 版本: $CHROME_VER"
-
-echo ">>> [4/6] 安裝與 Chrome 完全相符的 chromedriver"
-# Selenium Manager 偵測到的 PATH chromedriver 若版本不符會失敗；改抓 Chrome for Testing
-# 對應版本，放到 PATH 最前段的目錄覆蓋。
-DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip"
-mkdir -p "$HOME/.local/bin"
-if curl -sfL "$DRIVER_URL" -o /tmp/chromedriver.zip; then
-  python3 -c "import zipfile;zipfile.ZipFile('/tmp/chromedriver.zip').extractall('/tmp/cdz')"
-  cp /tmp/cdz/chromedriver-linux64/chromedriver "$HOME/.local/bin/chromedriver"
-  chmod +x "$HOME/.local/bin/chromedriver"
-  echo "    chromedriver: $("$HOME/.local/bin/chromedriver" --version)"
+# Chrome + chromedriver 僅 Stage 1 (Selenium 爬蟲) 需要。離線測試 / 只跑 Stage 2 的
+# 情境可設 SKIP_CHROME=1 略過，省去 apt 安裝時間。
+if [ "${SKIP_CHROME:-0}" = "1" ]; then
+  echo ">>> [3-4/6] 略過 Chrome / chromedriver 安裝 (SKIP_CHROME=1)"
 else
-  echo "    警告：找不到 $CHROME_VER 的精確 chromedriver，請改用相近版本。"
+  echo ">>> [3/6] 安裝 Google Chrome (Selenium 爬蟲所需)"
+  if ! command -v google-chrome >/dev/null 2>&1; then
+    curl -sL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    apt-get install -y -q /tmp/chrome.deb
+  fi
+  CHROME_VER="$(google-chrome --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')"
+  echo "    Chrome 版本: $CHROME_VER"
+
+  echo ">>> [4/6] 安裝與 Chrome 完全相符的 chromedriver"
+  # Selenium Manager 偵測到的 PATH chromedriver 若版本不符會失敗；改抓 Chrome for Testing
+  # 對應版本，放到 PATH 最前段的目錄覆蓋。
+  DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip"
+  mkdir -p "$HOME/.local/bin"
+  if curl -sfL "$DRIVER_URL" -o /tmp/chromedriver.zip; then
+    python3 -c "import zipfile;zipfile.ZipFile('/tmp/chromedriver.zip').extractall('/tmp/cdz')"
+    cp /tmp/cdz/chromedriver-linux64/chromedriver "$HOME/.local/bin/chromedriver"
+    chmod +x "$HOME/.local/bin/chromedriver"
+    echo "    chromedriver: $("$HOME/.local/bin/chromedriver" --version)"
+  else
+    echo "    警告：找不到 $CHROME_VER 的精確 chromedriver，請改用相近版本。"
+  fi
 fi
 
 echo ">>> [5/6] 建置並安裝 mjai-reviewer (tenhou -> mjai 轉換器)"
 if ! command -v mjai-reviewer >/dev/null 2>&1; then
   if command -v cargo >/dev/null 2>&1; then
-    LATEST="$(git ls-remote --tags --refs https://github.com/Equim-chan/mjai-reviewer.git \
-      | grep -oE 'refs/tags/.*' | sed 's#refs/tags/##' | sort -V | tail -1)"
-    echo "    從源碼建置 mjai-reviewer $LATEST (release build)"
+    # 可用 MJAI_REVIEWER_VERSION 釘選版本 (CI 用於重現與快取鍵)，未設則取最新 tag。
+    VER="${MJAI_REVIEWER_VERSION:-$(git ls-remote --tags --refs https://github.com/Equim-chan/mjai-reviewer.git \
+      | grep -oE 'refs/tags/.*' | sed 's#refs/tags/##' | sort -V | tail -1)}"
+    echo "    從源碼建置 mjai-reviewer $VER (release build)"
     rm -rf /tmp/mjr-src
-    git clone --depth 1 --branch "$LATEST" https://github.com/Equim-chan/mjai-reviewer.git /tmp/mjr-src
+    git clone --depth 1 --branch "$VER" https://github.com/Equim-chan/mjai-reviewer.git /tmp/mjr-src
     ( cd /tmp/mjr-src && cargo build --release )
     cp /tmp/mjr-src/target/release/mjai-reviewer "$HOME/.local/bin/mjai-reviewer"
     chmod +x "$HOME/.local/bin/mjai-reviewer"
