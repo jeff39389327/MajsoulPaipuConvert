@@ -236,6 +236,11 @@ def create_stealth_driver(headless_mode: bool, extra_args: List[str] = None):
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-software-rasterizer")
 
+    # Tolerate TLS-intercepting egress proxies (sandbox / CI environments). Without this,
+    # Chrome shows a "Your connection is not private" interstitial and no page content loads.
+    chrome_options.add_argument("--ignore-certificate-errors")
+    chrome_options.set_capability("acceptInsecureCerts", True)
+
     # Disable various features that may cause conflicts
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-background-networking")
