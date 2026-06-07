@@ -19,14 +19,21 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-echo ">>> [1/6] 安裝 Python 相依 (requirements.txt + scrapy/selenium)"
-# ms_api 是舊式 sdist，在新版環境會撞到 Debian setuptools 的 install_layout 衝突，
-# 需以 SETUPTOOLS_USE_DISTUTILS=stdlib 編譯；scrapy 需升級 cryptography，
-# 但系統的 Debian cryptography 無法被 pip 卸載，故以 --ignore-installed 略過。
+echo ">>> [1/6] 安裝 Python 相依"
 export SETUPTOOLS_USE_DISTUTILS=stdlib
-pip install -q -r requirements.txt || true                       # ms_api 可能於此失敗，下一步單獨處理
-pip install -q ms_api==0.11.100 --no-build-isolation             # 提供 `ms` protobuf 套件
-pip install -q scrapy==2.11.0 selenium==4.16.0 --ignore-installed cryptography
+
+# (a) ms_api 是唯一需要特殊處理的相依：舊式 sdist，在新版環境會撞到 Debian
+#     setuptools 的 install_layout 衝突，必須以 SETUPTOOLS_USE_DISTUTILS=stdlib
+#     且關閉 build isolation 才能編譯。先單獨裝好，requirements.txt 同一行即被滿足。
+pip install -q ms_api==0.11.100 --no-build-isolation
+
+# (b) 其餘相依：本專案某些套件 (scrapy 需新版 cryptography、flask 需新版 blinker)
+#     的舊版由 Debian apt 預裝，pip 無法卸載而報錯。用 --ignore-installed 讓 pip
+#     直接把新版裝進 site-packages 覆蓋系統版，而非嘗試卸載。
+#     刻意「不」用 `|| true`——這裡是嚴格安裝，任何真正的失敗都會讓 set -e 中止，
+#     不會在相依不完整 (例如缺 python-dotenv/tqdm) 的情況下誤報環境建立成功。
+grep -viE '^\s*#|^\s*$|^ms_api' requirements.txt > /tmp/reqs_no_msapi.txt
+pip install -q -r /tmp/reqs_no_msapi.txt --ignore-installed
 
 echo ">>> [2/6] 取得 tensoul-py-ng (toumajsoul.py 的下載器，.gitignore 內，需各自 clone)"
 if [ ! -d tensoul-py-ng ]; then
