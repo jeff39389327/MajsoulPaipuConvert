@@ -1,0 +1,18 @@
+# Node / Electron
+node_modules/
+package-lock.json
+
+# PyInstaller 凍結產物
+backend/dist/
+backend/build/
+backend/__pycache__/
+
+# 內建二進位（build 前自行放入，不入庫）
+vendor/mjai-reviewer.exe
+
+# electron-builder 輸出
+/dist_gui/
+
+# Python 快取
+__pycache__/
+*.py[cod]

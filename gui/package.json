@@ -1,0 +1,51 @@
+{
+  "name": "majsoul-paipu-gui",
+  "version": "0.1.0",
+  "description": "雀魂牌譜 Pipeline 一體式 GUI (爬 ID → 下載 → 轉換 → 設定)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/smoke.js",
+    "freeze": "python build/freeze_backend.py",
+    "dist": "npm run freeze && electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.local.majsoul.paipu",
+    "productName": "MajsoulPaipuGUI",
+    "directories": {
+      "output": "../dist_gui"
+    },
+    "files": [
+      "electron/**",
+      "renderer/**",
+      "assets/**"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/backend",
+        "to": "backend"
+      },
+      {
+        "from": "vendor/mjai-reviewer.exe",
+        "to": "bin/mjai-reviewer.exe"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

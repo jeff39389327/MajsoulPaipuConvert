@@ -19,6 +19,31 @@ Download game logs from MajSoul Stats and convert them to MJAI format. Supports 
 - Supported periods: 4w/1w/3d/1d
 - Automatic thinking time collection (optional)
 - Direct tenhou.net/6 format output
+- **Optional all-in-one Electron GUI** — guided flow with real-time progress,
+  parallel download/convert, and i18n (繁中 / English / 日本語). See [GUI](#gui-electron-all-in-one).
+
+## GUI (Electron, all-in-one)
+
+Prefer a desktop app over the CLI? `gui/` contains an Electron GUI that wraps the
+whole pipeline into a guided wizard: **choose method → collect IDs → download +
+convert → settings**, with real-time progress, cancel, and parallel Stage 2
+(concurrent downloads + concurrent mjai conversion). The UI is fully localized
+(zh-TW default, English, 日本語) and manages `config.env` / `crawler_config.json`
+through forms — no manual file editing.
+
+```bash
+cd gui
+npm install
+npm start          # dev mode (needs local Python env as in CLI install)
+npm test           # backend NDJSON smoke test (no Chrome / account needed)
+```
+
+Packaging produces a **Windows installer** via a full-freeze build (PyInstaller
+bundles the Python backend, electron-builder ships it plus a bundled
+`mjai-reviewer.exe`), so end users need **neither Python nor mjai-reviewer** —
+only **Google Chrome** (still required for Stage 1 scraping). On push to `main`,
+CI builds the installer and publishes it to the GitHub **Releases** `latest`
+prerelease. Full details and the packaging/CI steps are in [`gui/README.md`](gui/README.md).
 
 ## Requirements
 

@@ -1,0 +1,109 @@
+# 在 Windows 上全凍結打包 GUI（PyInstaller backend.exe + electron-builder NSIS），
+# 並把產生的安裝檔上傳到 GitHub Releases 的 rolling「latest」預發佈版。
+#
+# 外部相依（打包前取得）：
+#   - tensoul-py-ng：已直接納入本 repo（MIT），checkout 即帶著，毋需另外取得。
+#   - mjai-reviewer.exe：從 Equim-chan/mjai-reviewer 的 Releases 下載 Windows 版。
+#   - Chrome 瀏覽器：執行期才需要（爬取 ID），打包不需要。
+name: build-release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+# 同一分支的舊建置自動取消，避免堆疊
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      MJAI_REPO: Equim-chan/mjai-reviewer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python deps + PyInstaller
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # requirements 釘了 obsolete 的 PyPI backport asyncio==3.4.3，會遮蔽並破壞
+          # 3.11 內建的 asyncio；移除以使用標準庫版本。
+          pip uninstall -y asyncio
+          pip install pyinstaller
+
+      - name: Download bundled mjai-reviewer.exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Force -Path gui/vendor | Out-Null
+          New-Item -ItemType Directory -Force -Path mjai_tmp | Out-Null
+          gh release download --repo $env:MJAI_REPO --pattern "*windows*.zip" --dir mjai_tmp
+          $zip = Get-ChildItem mjai_tmp -Filter *.zip | Select-Object -First 1
+          if ($null -eq $zip) { Write-Error "找不到 mjai-reviewer 的 Windows 版 zip 資產"; exit 1 }
+          Expand-Archive -Path $zip.FullName -DestinationPath mjai_tmp/extracted -Force
+          $exe = Get-ChildItem mjai_tmp/extracted -Recurse -Filter mjai-reviewer.exe | Select-Object -First 1
+          if ($null -eq $exe) { Write-Error "解壓後找不到 mjai-reviewer.exe"; exit 1 }
+          Copy-Item $exe.FullName gui/vendor/mjai-reviewer.exe -Force
+
+      - name: Backend smoke test (NDJSON protocol)
+        shell: pwsh
+        run: node gui/test/smoke.js
+        env:
+          PYTHON: python
+
+      - name: Install GUI deps & build (freeze backend + electron-builder)
+        shell: pwsh
+        working-directory: gui
+        run: |
+          npm install
+          npm run dist
+
+      - name: Collect installer
+        id: collect
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist_gui -Recurse -Filter *.exe | Select-Object -First 1
+          if ($null -eq $exe) { Write-Error "dist_gui 內找不到輸出的 .exe"; exit 1 }
+          Write-Host "built: $($exe.FullName)"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MajsoulPaipuGUI-windows
+          path: dist_gui/*.exe
+          if-no-files-found: error
+
+      - name: Publish to Releases (rolling latest)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          prerelease: true
+          body: |
+            自 `main` 自動建置的最新 Windows 安裝檔。
+            Commit: ${{ github.sha }}
+          files: dist_gui/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
