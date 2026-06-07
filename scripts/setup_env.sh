@@ -78,6 +78,7 @@ if ! command -v mjai-reviewer >/dev/null 2>&1; then
     rm -rf /tmp/mjr-src
     git clone --depth 1 --branch "$VER" https://github.com/Equim-chan/mjai-reviewer.git /tmp/mjr-src
     ( cd /tmp/mjr-src && cargo build --release )
+    mkdir -p "$HOME/.local/bin"
     cp /tmp/mjr-src/target/release/mjai-reviewer "$HOME/.local/bin/mjai-reviewer"
     chmod +x "$HOME/.local/bin/mjai-reviewer"
   else

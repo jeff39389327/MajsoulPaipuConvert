@@ -70,12 +70,14 @@ jobs:
       - id: check
         env:
           MS_USERNAME: ${{ secrets.MS_USERNAME }}
+          MS_PASSWORD: ${{ secrets.MS_PASSWORD }}
         run: |
-          if [ -n "$MS_USERNAME" ]; then
+          # 兩個 Secrets 都要齊備才啟用線上測試，否則只設一半會帶著空密碼跑、登入必失敗。
+          if [ -n "$MS_USERNAME" ] && [ -n "$MS_PASSWORD" ]; then
             echo "has_secrets=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_secrets=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::未設定 MS_USERNAME / MS_PASSWORD Secrets，略過線上端到端測試。"
+            echo "::notice::未同時設定 MS_USERNAME 與 MS_PASSWORD Secrets，略過線上端到端測試。"
           fi
 
   # ---------------------------------------------------------------------------
