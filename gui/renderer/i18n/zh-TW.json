@@ -50,7 +50,7 @@
   "settings.python_path.label": "Python 路徑（開發模式）",
   "settings.python_path.hint": "留空則自動偵測；打包版已內建，不需設定",
   "settings.work_dir.label": "工作／輸出資料夾",
-  "settings.work_dir.hint": "存放設定檔與 mahjong_logs 輸出的資料夾",
+  "settings.work_dir.hint": "存放 config.env 與 mahjong_logs 輸出的資料夾；打包版預設為「執行檔同層」，留空即用預設",
   "settings.locale.label": "介面語言",
   "settings.saved": "設定已儲存",
 
@@ -112,6 +112,8 @@
   "crawl.done": "完成，共收集 {count} 筆 ID",
   "crawl.outputFile": "輸出檔案",
   "crawl.resumeHint": "偵測到上次進度，將自動續跑",
+  "crawl.autoDownload": "收集完成後自動下載並轉換",
+  "crawl.autoDownload.hint": "ID 收集完成後自動接續下載牌譜與轉換 MJAI，免再切到下載頁按開始",
 
   "download.title": "下載與轉換",
   "download.idle": "尚未開始",

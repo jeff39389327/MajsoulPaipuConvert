@@ -66,8 +66,9 @@ export function renderSettings(ctx, container) {
   container.append(field('', toggle(t('settings.sequential.label'), form.sequentialDownload, (v) => (form.sequentialDownload = v)),
     t('settings.sequential.hint')));
 
-  // 工作目錄（含瀏覽）
-  const workInput = textInput(form.workDir, (v) => (form.workDir = v));
+  // 工作目錄（含瀏覽）。留空時以 placeholder 顯示實際解析到的預設路徑（凍結版＝執行檔同層）。
+  const workInput = textInput(form.workDir, (v) => (form.workDir = v),
+    { placeholder: (state.paths && state.paths.workDir) || '' });
   const browseBtn = h('button', { class: 'ghost', onclick: async () => {
     const dir = await ctx.api.pickDir();
     if (dir) { form.workDir = dir; workInput.value = dir; }

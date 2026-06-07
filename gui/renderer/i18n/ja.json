@@ -50,7 +50,7 @@
   "settings.python_path.label": "Pythonパス（開発モード）",
   "settings.python_path.hint": "空欄で自動検出。パッケージ版は内蔵済み",
   "settings.work_dir.label": "作業・出力フォルダ",
-  "settings.work_dir.hint": "設定ファイルと mahjong_logs を置くフォルダ",
+  "settings.work_dir.hint": "config.env と mahjong_logs の出力フォルダ。パッケージ版は既定で実行ファイルと同じ場所、空欄で既定を使用",
   "settings.locale.label": "表示言語",
   "settings.saved": "設定を保存しました",
 
@@ -112,6 +112,8 @@
   "crawl.done": "完了、計 {count} 件のIDを収集",
   "crawl.outputFile": "出力ファイル",
   "crawl.resumeHint": "前回の進捗を検出。自動的に再開します",
+  "crawl.autoDownload": "完了後に自動でダウンロード＆変換",
+  "crawl.autoDownload.hint": "ID収集後、自動的にダウンロードとMJAI変換を実行します（手動開始は不要）",
 
   "download.title": "ダウンロードと変換",
   "download.idle": "未開始",

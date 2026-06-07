@@ -1,5 +1,5 @@
 // step-crawl —— 執行 Stage 1（爬牌譜 ID）。不定量進度 + 可取消 + 完成後自動接到下載。
-import { h } from './dom.js';
+import { h, toggle, field } from './dom.js';
 import { buildConfig } from './step-mode.js';
 
 export function renderCrawl(ctx, container) {
@@ -19,6 +19,15 @@ export function renderCrawl(ctx, container) {
 
   const result = h('div');
   container.append(result);
+
+  // 自動串接：收集完 ID 後直接接續 Stage 2（下載＋轉換），免再切到下載頁按一次開始。
+  let autoChain = state.settings.autoDownloadAfterCrawl !== false;
+  const autoToggle = toggle(t('crawl.autoDownload'), autoChain, async (v) => {
+    autoChain = v;
+    state.settings.autoDownloadAfterCrawl = v;
+    await ctx.api.setSettings({ autoDownloadAfterCrawl: v });
+  });
+  container.append(field('', autoToggle, t('crawl.autoDownload.hint')));
 
   const startBtn = h('button', { class: 'primary' }, t('btn.start'));
   const actions = h('div', { class: 'actions' }, startBtn);
@@ -59,8 +68,13 @@ export function renderCrawl(ctx, container) {
     bar.classList.add('indeterminate');
     label.textContent = t('status.running');
     await ctx.api.writeCrawler(buildConfig(form));
-    await ctx.runJob('crawl', { config: buildConfig(form) });
+    const res = await ctx.runJob('crawl', { config: buildConfig(form) });
     bar.classList.remove('indeterminate');
+    // 收集成功且開啟自動串接 → 進入下載頁並自動開始（state.autoStartDownload 由 download view 消費）。
+    if (autoChain && res && res.ok && state.crawlOutputFile) {
+      state.autoStartDownload = true;
+      ctx.navigate('download');
+    }
   };
 
   return off;

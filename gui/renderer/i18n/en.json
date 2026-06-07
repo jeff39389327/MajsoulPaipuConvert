@@ -50,7 +50,7 @@
   "settings.python_path.label": "Python path (dev mode)",
   "settings.python_path.hint": "Leave blank to auto-detect; packaged build has it bundled",
   "settings.work_dir.label": "Work / output folder",
-  "settings.work_dir.hint": "Folder holding config files and mahjong_logs output",
+  "settings.work_dir.hint": "Folder for config.env and mahjong_logs output; packaged build defaults to the executable's folder — leave blank to use it",
   "settings.locale.label": "Interface language",
   "settings.saved": "Settings saved",
 
@@ -112,6 +112,8 @@
   "crawl.done": "Done, collected {count} IDs",
   "crawl.outputFile": "Output file",
   "crawl.resumeHint": "Previous progress detected; will resume automatically",
+  "crawl.autoDownload": "Auto-download & convert when finished",
+  "crawl.autoDownload.hint": "After IDs are collected, automatically run download + MJAI conversion — no need to start it manually",
 
   "download.title": "Download & convert",
   "download.idle": "Not started",

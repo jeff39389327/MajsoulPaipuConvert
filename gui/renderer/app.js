@@ -21,6 +21,7 @@ const state = {
   config: { env: {}, crawler: null },
   doctor: null,
   crawlOutputFile: null, // Stage 1 完成後的輸出檔，供 Stage 2 自動接手
+  autoStartDownload: false, // 由 crawl 自動串接時設 true，download view 進場即自動開始
   activeStep: 'mode',
   jobStatus: 'idle', // idle | running | done | error
 };
@@ -67,6 +68,7 @@ function runJob(kind, params, onEvent) {
   return new Promise((resolve) => {
     setStatus('running');
     let settled = false;
+    let doneResult = null; // 後端送出的 done 事件先存著，待程序真正 exit 才據以 resolve
     let offEvent = null;
     let offExit = null;
     const finish = (result) => {
@@ -81,13 +83,15 @@ function runJob(kind, params, onEvent) {
       if (ev.type === 'error' && ev.fatal) setStatus('error');
       if (ev.type === 'done') {
         if (state.jobStatus !== 'error') setStatus(ev.ok ? 'done' : 'error');
-        finish(ev);
+        // 不在此 resolve：等後端程序真正 exit 再 resolve。否則自動串接時，爬蟲已送 done 但
+        // 子程序（scrapy/twisted/selenium 關閉）尚未結束，緊接著啟動下載會撞到 pyRunner 的 BUSY。
+        doneResult = ev;
       }
     });
-    // 後端程序退出但未發出 done -> 視為終止（done 已先 finish 時，offExit 已被解除，不會誤觸）
+    // 程序退出才真正結束：帶上先前的 done 結果；若未曾收到 done（取消/崩潰）則依退出碼判定。
     offExit = window.api.onExit((info) => {
       if (state.jobStatus === 'running') setStatus(info && info.code === 0 ? 'done' : 'error');
-      finish({ type: 'done', ok: false, viaExit: true });
+      finish(doneResult || { type: 'done', ok: !!(info && info.code === 0), viaExit: true });
     });
     window.api.startJob(kind, params || {}).then((ok) => {
       if (!ok) {

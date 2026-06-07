@@ -61,7 +61,7 @@ export function renderDownload(ctx, container) {
     }
   });
 
-  startBtn.onclick = async () => {
+  async function startDownload() {
     result.innerHTML = '';
     dlDone = 0; cvDone = 0;
     setBar(dlBar, 0, 1); setBar(cvBar, 0, 1);
@@ -69,7 +69,14 @@ export function renderDownload(ctx, container) {
     const params = {};
     if (state.crawlOutputFile) params.input_list = state.crawlOutputFile;
     await ctx.runJob('download', params);
-  };
+  }
+  startBtn.onclick = startDownload;
+
+  // 由 Stage 1 自動串接而來：進場即自動開始下載（只觸發一次）。
+  if (state.autoStartDownload) {
+    state.autoStartDownload = false;
+    startDownload();
+  }
 
   return off;
 }

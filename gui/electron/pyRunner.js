@@ -60,12 +60,13 @@ function startJob(kind, options, send) {
 
   child.on('error', (err) => {
     send('py:event', { type: 'error', code: 'SPAWN_FAILED', msg: String(err), fatal: true });
-    current = null;
+    if (current && current.child === child) current = null;
   });
 
   child.on('exit', (code, signal) => {
     send('py:exit', { code, signal });
-    current = null;
+    // 只有當 current 仍是「這個」child 才清空，避免上一個 job 較晚的 exit 誤清掉新啟動的 job。
+    if (current && current.child === child) current = null;
   });
 
   return true;

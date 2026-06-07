@@ -19,12 +19,13 @@ function settingsFile() {
 function defaultSettings() {
   return {
     repoRoot: REPO_ROOT,
-    workDir: REPO_ROOT, // dev 預設等於 repo root；凍結版由使用者選
+    workDir: '', // 留空＝自動：dev 用 repo root，凍結版用執行檔同層的可寫資料夾 (見 defaultWorkDir)
     pythonPath: '',
     locale: '',
     downloadConcurrency: 3,
     convertConcurrency: 0, // 0 = 後端自動 (CPU 核心)
     sequentialDownload: false,
+    autoDownloadAfterCrawl: true, // 收集完 ID 後自動接續 Stage 2（下載＋轉換）
   };
 }
 
@@ -44,12 +45,46 @@ function saveSettings(s) {
 
 let settings = null;
 
+// 挑第一個能建立且可寫的資料夾；全部失敗則回傳最後一個候選（讓後端去報實際寫入錯誤）。
+function pickWritableDir(candidates) {
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      return dir;
+    } catch (_) {
+      /* 試下一個候選 */
+    }
+  }
+  return candidates[candidates.length - 1];
+}
+
+// 「自動」工作目錄：dev = repo root；凍結版 = 安裝執行檔同層（使用者要求輸出與執行檔同層、
+// 好找）。同層不可寫（如裝到 Program Files）才退到 文件夾 / userData。
+function defaultWorkDir() {
+  if (!isPackaged()) return REPO_ROOT;
+  const exeDir = path.dirname(app.getPath('exe'));
+  return pickWritableDir([
+    exeDir,
+    path.join(app.getPath('documents'), 'MajsoulPaipuGUI'),
+    path.join(app.getPath('userData'), 'work'),
+  ]);
+}
+
+// 解析實際工作目錄。未自訂（空字串）或仍是舊版自動預設（REPO_ROOT；凍結版即 resources 夾，
+// 埋在 app 內部不好找）一律改用 defaultWorkDir()，達成「與執行檔同層」並自動遷移舊設定。
+function resolveWorkDir() {
+  const w = settings && settings.workDir;
+  if (!w || path.resolve(w) === path.resolve(REPO_ROOT)) return defaultWorkDir();
+  return w;
+}
+
 // 由設定推導出關鍵路徑。
 // 凍結版的 repoRoot 位於唯讀的 process.resourcesPath 底下，crawler_config.json 與爬取
-// 輸出須改放使用者選定、可寫的 workDir；spider/extractor 已 bundle，不依賴 inner package 目錄。
+// 輸出須改放可寫的 workDir；spider/extractor 已 bundle，不依賴 inner package 目錄。
 function derivePaths() {
   const repoRoot = settings.repoRoot || REPO_ROOT;
-  const workDir = settings.workDir || repoRoot;
+  const workDir = resolveWorkDir();
   const innerDir = isPackaged()
     ? workDir
     : path.join(repoRoot, 'paipu_project', 'paipu_project');
