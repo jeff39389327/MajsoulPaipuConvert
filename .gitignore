@@ -24,8 +24,8 @@ venv/
 env/
 config.env
 
-# 第三方庫
-tensoul-py-ng/
+# 第三方庫 tensoul-py-ng 已直接納入本 repo (MIT, https://github.com/unStatiK/tensoul-py-ng)；
+# 其執行時生成的 ms_cfg.json 由 tensoul-py-ng/.gitignore 自行忽略。
 
 # GUI 打包產物 (electron-builder 輸出於 repo 根的 dist_gui/)
 dist_gui/

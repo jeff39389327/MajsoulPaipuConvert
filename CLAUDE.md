@@ -48,9 +48,11 @@ and it only checks the MJAI output directory.
 - **`mjai-reviewer`** — the tenhou→MJAI conversion is done by shelling out to
   `mjai-reviewer --no-review` (see `toumajsoul.py:process_log`). Without it, only tenhou output is produced.
 - **Google Chrome + matching ChromeDriver** — all scraping is Selenium-driven.
-- **`tensoul-py-ng/`** — a vendored third-party repo (its own git clone; **gitignored**, not tracked
-  here). It provides `MajsoulPaipuDownloader`. `toumajsoul.py` adds it to `sys.path` with a
-  *relative* path (`sys.path.append('tensoul-py-ng')`), which is why Stage 2 must run from the repo root.
+- **`tensoul-py-ng/`** — a vendored third-party package (MIT, from https://github.com/unStatiK/tensoul-py-ng),
+  now **committed into this repo** (its upstream is unmaintained). It provides `MajsoulPaipuDownloader`.
+  `toumajsoul.py` adds it to `sys.path` with a *relative* path (`sys.path.append('tensoul-py-ng')`), which
+  is why Stage 2 must run from the repo root. Its runtime-generated `tensoul/ms_cfg.json` stays gitignored
+  (via `tensoul-py-ng/.gitignore`); `ms_patch.ensure_ms_cfg()` creates it from `ms_cfg.example.json`.
 - **`ms` protobuf package** — comes from the `ms_api` pip package (in requirements.txt), used to fetch
   raw `GameDetailRecords` for timing extraction. Do not confuse it with the `tensoul-py-ng/tensoul` package.
 

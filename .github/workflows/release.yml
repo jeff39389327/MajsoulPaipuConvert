@@ -2,9 +2,7 @@
 # 並把產生的安裝檔上傳到 GitHub Releases 的 rolling「latest」預發佈版。
 #
 # 外部相依（打包前取得）：
-#   - tensoul-py-ng：gitignored 的第三方依賴，由 repo 變數/密鑰 TENSOUL_REPO_URL clone。
-#       到 Settings → Secrets and variables → Actions 設定 TENSOUL_REPO_URL（公開可用 vars，
-#       私有含 token 用 secrets）。若改成把 tensoul-py-ng 直接納入本 repo，移除該步即可。
+#   - tensoul-py-ng：已直接納入本 repo（MIT），checkout 即帶著，毋需另外取得。
 #   - mjai-reviewer.exe：從 Equim-chan/mjai-reviewer 的 Releases 下載 Windows 版。
 #   - Chrome 瀏覽器：執行期才需要（爬取 ID），打包不需要。
 name: build-release
@@ -29,7 +27,6 @@ jobs:
     runs-on: windows-latest
     env:
       MJAI_REPO: Equim-chan/mjai-reviewer
-      TENSOUL_REPO_URL: ${{ vars.TENSOUL_REPO_URL || secrets.TENSOUL_REPO_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,19 +50,6 @@ jobs:
           # 3.11 內建的 asyncio；移除以使用標準庫版本。
           pip uninstall -y asyncio
           pip install pyinstaller
-
-      - name: Clone tensoul-py-ng (vendored third-party dependency)
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:TENSOUL_REPO_URL)) {
-            Write-Error "TENSOUL_REPO_URL 未設定。請在 repo Settings -> Secrets and variables -> Actions 新增 variable/secret TENSOUL_REPO_URL（tensoul-py-ng 的 git URL），或改為把 tensoul-py-ng 納入本 repo 並移除此步驟。"
-            exit 1
-          }
-          git clone --depth 1 $env:TENSOUL_REPO_URL tensoul-py-ng
-          if (-not (Test-Path tensoul-py-ng/tensoul)) {
-            Write-Error "clone 後找不到 tensoul-py-ng/tensoul 套件，請確認 TENSOUL_REPO_URL 指向正確的 repo。"
-            exit 1
-          }
 
       - name: Download bundled mjai-reviewer.exe
         shell: pwsh
