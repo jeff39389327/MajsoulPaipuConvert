@@ -41,7 +41,15 @@ export function renderCrawl(ctx, container) {
         h('button', { class: 'primary', onclick: () => ctx.navigate('download') }, t('btn.toDownload'))));
     } else if (ev.type === 'error' && ev.fatal) {
       bar.classList.remove('indeterminate');
-      result.append(h('div', { class: 'notice err' }, ctx.t('error.' + ev.code) || ctx.t('error.generic', { code: ev.code })));
+      // t() 缺 key 時回傳原 key，故以「是否等於 key」判斷有無在地化字串，沒有就用 generic。
+      const localized = ctx.t('error.' + ev.code);
+      const headline = localized === 'error.' + ev.code
+        ? ctx.t('error.generic', { code: ev.code })
+        : localized;
+      const box = h('div', { class: 'notice err' }, h('div', null, headline));
+      // 後端把真正的例外字串放在 ev.msg；附在錯誤框內，避免使用者只看到籠統訊息。
+      if (ev.msg) box.append(h('div', { class: 'path' }, ev.msg));
+      result.append(box);
     }
   });
 

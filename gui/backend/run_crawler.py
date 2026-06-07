@@ -98,8 +98,15 @@ def _run_scrapy_frozen(params: dict, output_path: str) -> None:
         from scrapy.crawler import CrawlerProcess  # noqa: WPS433 (frozen import)
         from scrapy.utils.project import get_project_settings  # noqa: WPS433
 
+        # 凍結後不能用名稱啟動 spider：Scrapy 的 SpiderLoader 透過 pkgutil.iter_modules
+        # 掃描 SPIDER_MODULES 來探索 spider，但 PyInstaller 把模組封進 exe，frozen importer
+        # 的套件路徑列舉不到 bundle 進去的 paipu_project.spiders.PaipuSpider，
+        # process.crawl("paipu_spider") 會同步丟 "Spider not found"（這正是 GUI 看到的
+        # CRAWL_EXCEPTION）。改為直接 import 類別、以類別啟動，完全繞過名稱解析/探索。
+        from paipu_project.spiders.PaipuSpider import PaipuSpider  # noqa: WPS433
+
         process = CrawlerProcess(get_project_settings())
-        process.crawl("paipu_spider")
+        process.crawl(PaipuSpider)
         process.start()  # 阻塞直到完成
 
     # 凍結模式下無法即時逐行解析，改由輸出檔行數回報最終數量。
@@ -119,6 +126,11 @@ def run(params: dict) -> None:
         else:
             _run_scrapy_cli(params, output_path)
     except Exception as exc:  # noqa: BLE001 - 回報致命錯誤碼給前端
+        # 完整堆疊印到 stderr（GUI 把 stderr 當原始 log 顯示於可折疊面板），方便診斷；
+        # 同時把例外字串放進 error event 的 msg，前端會一併呈現於錯誤框。
+        import traceback
+
+        traceback.print_exc()
         bridge.error("crawl", "CRAWL_EXCEPTION", str(exc), fatal=True)
         bridge.done(ok=False, exit_code=1)
 
