@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import types
@@ -50,13 +51,32 @@ def _client_version_string() -> str:
     return f"WebGL_2022-{_res_version()}"
 
 
+def _tensoul_pkg_dir(tensoul_dir: str) -> str:
+    """回傳 tensoul 套件實際所在目錄 (cfg.py 用 __file__.parent 讀 ms_cfg.json)。
+
+    優先用 find_spec 定位 (不會執行套件程式碼，故安全於 import tensoul 之前)，
+    使開發版 (tensoul-py-ng/tensoul) 與 PyInstaller 打包版 (_internal/tensoul) 都正確；
+    找不到才退回相對路徑。"""
+    try:
+        spec = importlib.util.find_spec("tensoul")
+    except (ImportError, ValueError):
+        spec = None
+    if spec is not None:
+        if spec.submodule_search_locations:
+            return list(spec.submodule_search_locations)[0]
+        if spec.origin:  # 退而求其次：以 __init__ 之父目錄為套件目錄
+            return os.path.dirname(spec.origin)
+    return os.path.join(tensoul_dir, "tensoul")
+
+
 def ensure_ms_cfg(tensoul_dir: str = "tensoul-py-ng") -> None:
     """tensoul 的 cfg.py 於 import 時即讀 ms_cfg.json，缺檔會 import 失敗。
     若不存在則以 ms_cfg.example.json 為底建立並設成 CN。**必須在 import tensoul 之前呼叫。**"""
-    cfg_path = os.path.join(tensoul_dir, "tensoul", "ms_cfg.json")
+    pkg_dir = _tensoul_pkg_dir(tensoul_dir)
+    cfg_path = os.path.join(pkg_dir, "ms_cfg.json")
     if os.path.exists(cfg_path):
         return
-    example = os.path.join(tensoul_dir, "tensoul", "ms_cfg.example.json")
+    example = os.path.join(pkg_dir, "ms_cfg.example.json")
     if os.path.exists(example):
         with open(example, "r", encoding="utf-8") as f:
             data = json.load(f)
