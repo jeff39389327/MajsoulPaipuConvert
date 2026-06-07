@@ -66,6 +66,8 @@ class OptimizedPaipuExtractor:
         self.player_mode = player_mode
         self.driver = None
         self.temp_user_data_dir = None
+        # 目標日期的 YYMMDD 前綴（如 "251110"），於 extract_from_rooms 設定；player 模式據此過濾牌譜
+        self.date_prefix = None
         self.setup_driver()
 
 
@@ -1022,11 +1024,14 @@ class OptimizedPaipuExtractor:
             return None, None
 
 
-    def collect_all_paipus_on_player_page(self, existing_ids=None):
+    def collect_all_paipus_on_player_page(self, existing_ids=None, date_prefix=None, limit=None):
         """在當前玩家頁面向下捲動並收集所有 paipu= 連結的牌譜 ID。
 
         Args:
             existing_ids: 用來避免重複加入的 ID set，允許為 None。
+            date_prefix: 目標日期的 YYMMDD 前綴（如 "251110"）。若提供，只收集當天的
+                牌譜；由於玩家頁面依時間新→舊排序，掃到比目標日更舊的牌譜即可停止捲動。
+            limit: 本次最多收集的牌譜數量。達標後立即停止，避免超量輸出。
 
         Returns:
             List[str]: 本次在該玩家頁面新收集到的所有牌譜 ID。
@@ -1037,6 +1042,7 @@ class OptimizedPaipuExtractor:
             existing_ids = set()
 
         collected = []
+        reached_older = False
 
         try:
             print(f"[PlayerMode] 等待玩家頁面 paipu 連結載入...", file=sys.stderr)
@@ -1067,12 +1073,29 @@ class OptimizedPaipuExtractor:
                     if clean_paipu_id in existing_ids:
                         continue
 
+                    # 依日期過濾：牌譜 ID 前 6 碼為 YYMMDD（定寬零補），玩家頁面依時間新→舊排序，
+                    # 故可直接用字串比較（字典序等同數值序）。
+                    if date_prefix:
+                        id_prefix = clean_paipu_id[:6]
+                        if id_prefix > date_prefix:
+                            continue  # 比目標日新，繼續往下捲
+                        if id_prefix < date_prefix:
+                            reached_older = True  # 已捲過目標日，之後皆為更舊的牌譜
+                            continue
+
                     existing_ids.add(clean_paipu_id)
                     collected.append(clean_paipu_id)
 
                     # 立即輸出到 stdout 供 Spider 即時讀取
                     print(f"[PlayerMode] 收集到牌譜 #{len(collected)}: {clean_paipu_id}", file=sys.stderr)
                     print(clean_paipu_id, flush=True)
+
+                    if limit is not None and len(collected) >= limit:
+                        break
+
+                # 已達上限或已掃過目標日期，停止捲動
+                if (limit is not None and len(collected) >= limit) or reached_older:
+                    break
 
                 # 檢查是否已經滾動到底部
                 at_bottom = self.driver.execute_script(
@@ -1091,8 +1114,11 @@ class OptimizedPaipuExtractor:
 
         return collected
 
-    def collect_all_paipus_for_game_player_mode(self, game_record, room_info):
+    def collect_all_paipus_for_game_player_mode(self, game_record, room_info, limit=None):
         """player_mode 下：對單局的所有玩家逐一進入玩家頁面並收集所有牌譜 ID。
+
+        Args:
+            limit: 本局最多收集的牌譜數量（None 表示不限）。達標後停止造訪其餘玩家。
 
         Returns:
             Tuple[List[str], Optional[str]]: (該局所有新收集到的牌譜 ID, session_id)
@@ -1130,7 +1156,13 @@ class OptimizedPaipuExtractor:
             all_new_paipus = []
             seen_ids = set()
 
+            # 目標日期的 YYMMDD 前綴（run 層級常數，於 extract_from_rooms 解析一次）
+            date_prefix = self.date_prefix
+
             for idx, player_href in enumerate(player_hrefs):
+                if limit is not None and len(all_new_paipus) >= limit:
+                    break
+
                 if not player_href:
                     print(f"[PlayerMode] 跳過空的 player_href (idx={idx})", file=sys.stderr)
                     continue
@@ -1184,7 +1216,10 @@ class OptimizedPaipuExtractor:
                 if not success:
                     continue
 
-                player_paipus = self.collect_all_paipus_on_player_page(existing_ids=seen_ids)
+                remaining = (limit - len(all_new_paipus)) if limit is not None else None
+                player_paipus = self.collect_all_paipus_on_player_page(
+                    existing_ids=seen_ids, date_prefix=date_prefix, limit=remaining
+                )
                 print(f"[PlayerMode] 玩家 {player_name} 新增 {len(player_paipus)} 個牌譜", file=sys.stderr)
                 all_new_paipus.extend(player_paipus)
 
@@ -1335,7 +1370,7 @@ class OptimizedPaipuExtractor:
                     # 根據模式選擇不同的處理方式
                     if self.player_mode:
                         paipu_ids, session_id = self.collect_all_paipus_for_game_player_mode(
-                            unprocessed_game, room_info
+                            unprocessed_game, room_info, limit=max_paipus - len(extracted_paipus)
                         )
 
                         if session_id:
@@ -1475,7 +1510,7 @@ class OptimizedPaipuExtractor:
 
                         if self.player_mode:
                             paipu_ids, session_id = self.collect_all_paipus_for_game_player_mode(
-                                unprocessed_game, room_info
+                                unprocessed_game, room_info, limit=max_paipus - len(extracted_paipus)
                             )
 
                             if session_id:
@@ -1571,7 +1606,7 @@ class OptimizedPaipuExtractor:
 
                         if self.player_mode:
                             paipu_ids, session_id = self.collect_all_paipus_for_game_player_mode(
-                                unprocessed_game, room_info
+                                unprocessed_game, room_info, limit=max_paipus - len(extracted_paipus)
                             )
 
                             if session_id:
@@ -1649,6 +1684,12 @@ class OptimizedPaipuExtractor:
     def extract_from_rooms(self, target_date, target_ranks=None, max_paipus=5):
         if target_ranks is None:
             target_ranks = ["Jade"]
+
+        # target_date 為整個 run 的固定值，只在此處解析一次供 player 模式過濾使用
+        try:
+            self.date_prefix = datetime.strptime(target_date, "%Y-%m-%d").strftime("%y%m%d")
+        except (TypeError, ValueError):
+            self.date_prefix = None
 
         all_paipus = []
 

@@ -14,10 +14,9 @@ import subprocess
 import sys
 import os
 import tempfile
-import shutil
 import signal
-import atexit
 import random
+import traceback
 
 @dataclass
 class CrawlerConfig:
@@ -217,6 +216,54 @@ def apply_stealth_js(driver):
     except Exception as e:
         print(f"Error applying anti-detection measures: {e}")
 
+def create_stealth_driver(headless_mode: bool, extra_args: List[str] = None):
+    """Build a Chrome WebDriver with stability flags, log suppression and anti-detection applied.
+
+    Returns (driver, remote_port). extra_args are appended verbatim (e.g. window size).
+    """
+    chrome_options = Options()
+
+    if headless_mode:
+        chrome_options.add_argument("--headless=new")
+
+    # Core fix: Do not use user-data-dir, use random port isolation
+    remote_port = random.randint(9222, 65535)
+    chrome_options.add_argument(f"--remote-debugging-port={remote_port}")
+
+    # Core stability parameters
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-software-rasterizer")
+
+    # Disable various features that may cause conflicts
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--no-first-run")
+    chrome_options.add_argument("--no-default-browser-check")
+    chrome_options.add_argument("--disable-popup-blocking")
+
+    for arg in (extra_args or []):
+        chrome_options.add_argument(arg)
+
+    # Prevent detection as automation tool
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+
+    # Log settings - strongly suppress all logs
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_argument("--silent")
+    chrome_options.add_argument("--disable-logging")
+
+    # Set environment variables to suppress Chrome logs
+    os.environ['WDM_LOG_LEVEL'] = '0'
+    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+
+    driver = webdriver.Chrome(options=chrome_options)
+    apply_stealth_js(driver)  # Apply anti-detection
+    return driver, remote_port
+
 def get_rank_display_name(rank: str) -> Dict[str, str]:
     """Get rank display name mapping"""
     rank_mapping = {
@@ -240,7 +287,7 @@ def get_period_display_name(period: str) -> str:
     }
     return period_mapping.get(period, period)
 
-def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False, output_file=None) -> List[str]:
+def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False, output_file=None, player_mode: bool = False) -> List[str]:
     """
     Execute date_room_extractor.py and get the output paipu ID list
 
@@ -249,6 +296,7 @@ def execute_date_room_extractor_py(target_date: str, target_room: str, headless_
         target_room: Target room (e.g.: "Throne", "Jade", "Gold", etc.)
         headless_mode: Whether to use headless mode
         fast_mode: Whether to use fast mode (faster but may miss 5-10% data)
+        player_mode: True 表示啟用逐玩家頁面模式（date_room_player）
 
     Returns:
         List of paipu IDs
@@ -269,7 +317,7 @@ def main():
 
     target_ranks = convert_ranks_to_english(target_ranks)
 
-    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode)
+    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode, player_mode={player_mode})
 
     try:
         results = extractor.extract_from_rooms(
@@ -291,7 +339,8 @@ if __name__ == "__main__":
         target_date=target_date,
         target_room=target_room,
         headless_mode=str(headless_mode),
-        fast_mode=str(fast_mode)
+        fast_mode=str(fast_mode),
+        player_mode=str(player_mode)
     )
 
     # Create temporary file
@@ -344,7 +393,8 @@ if __name__ == "__main__":
         return_code = process.wait()
 
         if return_code != 0:
-            print(f"Error: date_room_extractor.py exited with code {return_code}")
+            mode_suffix = " (player mode)" if player_mode else ""
+            print(f"Error: date_room_extractor.py{mode_suffix} exited with code {return_code}")
             return []
 
         return paipu_ids
@@ -353,125 +403,20 @@ if __name__ == "__main__":
         # Delete temporary file
         try:
             os.unlink(temp_file_path)
-        except:
-            pass
-
-
-
-def execute_date_room_player_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False, output_file=None) -> List[str]:
-    """以 player 模式執行 date_room_extractor.py，回傳該日所有玩家頁面的牌譜 ID 列表"""
-    temp_script = """
-import sys
-sys.path.insert(0, '.')
-from date_room_extractor import OptimizedPaipuExtractor, convert_ranks_to_english
-
-
-def main():
-    # Parameter settings
-    target_date = "{target_date}"
-    target_ranks = ["{target_room}"]
-    max_paipus = 99999
-    headless_mode = {headless_mode}
-    fast_mode = {fast_mode}
-
-    target_ranks = convert_ranks_to_english(target_ranks)
-
-    # 啟用 player_mode=True：針對每局中所有玩家逐一進入玩家頁面收集牌譜
-    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode, player_mode=True)
-
-    try:
-        results = extractor.extract_from_rooms(
-            target_date=target_date,
-            target_ranks=target_ranks,
-            max_paipus=max_paipus
-        )
-
-        # Output only paipu IDs, one per line
-        for paipu in results:
-            print(paipu)
-
-    finally:
-        extractor.close()
-
-
-if __name__ == "__main__":
-    main()
-""".format(
-        target_date=target_date,
-        target_room=target_room,
-        headless_mode=str(headless_mode),
-        fast_mode=str(fast_mode)
-    )
-
-    # 建立暫存檔案
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
-        temp_file.write(temp_script)
-        temp_file_path = temp_file.name
-
-    try:
-        # 以即時輸出模式執行暫存腳本
-        env = os.environ.copy()
-        env['PYTHONIOENCODING'] = 'utf-8'
-
-        process = subprocess.Popen(
-            [sys.executable, '-u', temp_file_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            bufsize=1,
-            universal_newlines=True,
-            env=env,
-        )
-
-        # 即時收集牌譜 ID，並同時顯示 extractor 輸出
-        paipu_ids: List[str] = []
-        for line in process.stdout:
-            line = line.rstrip()
-            if not line:
-                continue
-
-            # 顯示 extractor 的原始輸出，方便除錯
-            try:
-                print(f"  [extractor] {line}", flush=True)
-            except UnicodeEncodeError:
-                print(
-                    f"  [extractor] {line.encode('utf-8', errors='replace').decode('utf-8')}",
-                    flush=True,
-                )
-
-            # 判斷是否為牌譜 ID
-            if re.match(r'^[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', line.strip()):
-                paipu_id = line.strip()
-                paipu_ids.append(paipu_id)
-
-                # 即時寫入到檔案
-                if output_file:
-                    output_file.write(paipu_id + "\n")
-                    output_file.flush()
-                    print(f"[Spider] 即時寫入牌譜: {paipu_id}", flush=True)
-
-        return_code = process.wait()
-        if return_code != 0:
-            print(f"Error: date_room_extractor.py (player mode) exited with code {return_code}")
-            return []
-
-        return paipu_ids
-
-    finally:
-        try:
-            os.unlink(temp_file_path)
         except Exception:
             pass
 
-def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List[str]:
-    """Collect paipus using date_room mode"""
-    all_paipus = []
+
+def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None, player_mode: bool = False) -> List[str]:
+    """Collect paipus using date_room mode (player_mode=True 逐玩家收集所有玩家頁面牌譜)"""
+    mode_label = "date_room_player" if player_mode else "date_room"
+    all_paipus: List[str] = []
+    seen = set()
     interrupted = False
+    progress_file = "crawler_progress.json"
 
     # Setup interrupt handler
-    def signal_handler(sig, frame):
+    def signal_handler(sig, frame):  # noqa: ARG001 - callback signature fixed by signal
         nonlocal interrupted
         print(f"\n\nInterrupt signal received (Ctrl+C)")
         print(f"Currently collected {len(all_paipus)} paipus")
@@ -485,12 +430,32 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
         start_date = datetime.strptime(config.start_date, "%Y-%m-%d")
         end_date = datetime.strptime(config.end_date, "%Y-%m-%d")
 
+        # Check for existing progress (player mode supports resume)
+        if player_mode and os.path.exists(progress_file):
+            try:
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    progress = json.load(f)
+
+                if progress.get('mode') == 'date_room_player' and \
+                   progress.get('target_room') == config.target_room and \
+                   progress.get('end_date') == config.end_date:
+
+                    last_date_str = progress.get('last_processed_date')
+                    if last_date_str:
+                        last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
+                        if start_date <= last_date < end_date:
+                            print(f"\nFound progress file. Resuming from {last_date_str}...")
+                            start_date = last_date + timedelta(days=1)
+                            print(f"New start date: {start_date.strftime('%Y-%m-%d')}")
+            except Exception as e:
+                print(f"Error reading progress file: {e}")
+
         # Calculate total days
         total_days = (end_date - start_date).days + 1
         print(f"\n{'='*70}")
-        print(f"Starting date_room mode collection")
+        print(f"Starting {mode_label} mode collection")
         print(f"{'='*70}")
-        print(f"Date range: {config.start_date} to {config.end_date} (total {total_days} days)")
+        print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {config.end_date} (total {total_days} days)")
         print(f"Target room: {config.target_room}")
         print(f"Headless mode: {'Enabled' if config.headless_mode else 'Disabled'}")
         print(f"Fast mode: {' Enabled' if config.fast_mode else 'Disabled (complete)'}")
@@ -518,11 +483,11 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
                     target_room=config.target_room,
                     headless_mode=config.headless_mode,
                     fast_mode=config.fast_mode,
-                    output_file=output_file  # 傳遞 output_file 以實現即時寫入
+                    output_file=output_file,  # 傳遞 output_file 以實現即時寫入
+                    player_mode=player_mode,
                 )
             except Exception as e:
                 print(f"Error processing {date_str}: {e}")
-                import traceback
                 traceback.print_exc()
                 day_results = []
 
@@ -535,9 +500,27 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
             # 注意：牌譜已在 execute_date_room_extractor_py 中即時寫入，這裡只做去重統計
             new_paipus = 0
             for paipu in day_results:
-                if paipu not in all_paipus:
+                if paipu not in seen:
+                    seen.add(paipu)
                     all_paipus.append(paipu)
                     new_paipus += 1
+
+            # Save progress (player mode supports resume)
+            if player_mode:
+                try:
+                    progress_data = {
+                        'mode': 'date_room_player',
+                        'target_room': config.target_room,
+                        'start_date': config.start_date,
+                        'end_date': config.end_date,
+                        'last_processed_date': date_str,
+                        'timestamp': time.time()
+                    }
+                    with open(progress_file, 'w', encoding='utf-8') as f:
+                        json.dump(progress_data, f, ensure_ascii=False, indent=2)
+                    print(f"Progress saved: {date_str}")
+                except Exception as e:
+                    print(f"Error saving progress: {e}")
 
             day_elapsed = time.time() - day_start
             total_elapsed = time.time() - start_time
@@ -552,7 +535,7 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
             # Move to next day
             current_date += timedelta(days=1)
 
-            # If not the last day, wait a bit
+            # If not the last day, show ETA
             if current_date <= end_date:
                 remaining_days = (end_date - current_date).days + 1
                 avg_time_per_day = total_elapsed / day_count
@@ -563,9 +546,16 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
         total_time = time.time() - start_time
         print(f"\n{'='*70}")
         if interrupted:
-            print(f"date_room mode collection interrupted by user!")
+            print(f"{mode_label} mode collection interrupted by user!")
         else:
-            print(f"date_room mode collection completed!")
+            print(f"{mode_label} mode collection completed!")
+            # Clean up progress file on completion (player mode only)
+            if player_mode and os.path.exists(progress_file):
+                try:
+                    os.remove(progress_file)
+                    print("Progress file removed (task completed)")
+                except Exception:
+                    pass
         print(f"{'='*70}")
         print(f"Total collected: {len(all_paipus)} unique paipu IDs")
         print(f"Days processed: {day_count} days")
@@ -575,175 +565,29 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None) -> List
         print(f"{'='*70}\n")
 
     except Exception as e:
-        print(f"\ndate_room mode execution error: {e}")
-        import traceback
+        print(f"\n{mode_label} mode execution error: {e}")
         traceback.print_exc()
         print(f"Collected {len(all_paipus)} paipus before error")
 
     return all_paipus
 
 
-def collect_paipus_by_date_room_player(config: CrawlerConfig, output_file=None) -> List[str]:
-    """Collect paipus using date_room_player mode (逐玩家收集所有牌譜)"""
-    all_paipus: List[str] = []
-    interrupted = False
-    progress_file = "crawler_progress.json"
+def find_rank_checkbox(driver, rank: str):
+    """Locate a rank's (label, checkbox, label_text), trying the English then Chinese label.
 
-    # Setup interrupt handler
-    def signal_handler(sig, frame):  # noqa: ARG001 - callback signature fixed by signal
-        nonlocal interrupted
-        print(f"\n\nInterrupt signal received (Ctrl+C)")
-        print(f"Currently collected {len(all_paipus)} paipus")
-        print(f"Saving data...")
-        interrupted = True
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    try:
-        # Parse date range
-        start_date = datetime.strptime(config.start_date, "%Y-%m-%d")
-        end_date = datetime.strptime(config.end_date, "%Y-%m-%d")
-
-        # Check for existing progress
-        if os.path.exists(progress_file):
-            try:
-                with open(progress_file, 'r', encoding='utf-8') as f:
-                    progress = json.load(f)
-                
-                if progress.get('mode') == 'date_room_player' and \
-                   progress.get('target_room') == config.target_room and \
-                   progress.get('end_date') == config.end_date:
-                    
-                    last_date_str = progress.get('last_processed_date')
-                    if last_date_str:
-                        last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
-                        if start_date <= last_date < end_date:
-                            print(f"\nFound progress file. Resuming from {last_date_str}...")
-                            start_date = last_date + timedelta(days=1)
-                            print(f"New start date: {start_date.strftime('%Y-%m-%d')}")
-            except Exception as e:
-                print(f"Error reading progress file: {e}")
-
-        # Calculate total days
-        total_days = (end_date - start_date).days + 1
-        print(f"\n{'='*70}")
-        print(f"Starting date_room_player mode collection")
-        print(f"{'='*70}")
-        print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {config.end_date} (total {total_days} days)")
-        print(f"Target room: {config.target_room}")
-        print(f"Headless mode: {'Enabled' if config.headless_mode else 'Disabled'}")
-        print(f"Fast mode: {' Enabled' if config.fast_mode else 'Disabled (complete)'}")
-        print(f"Output file: {config.output_filename}")
-        print(f"{'='*70}\n")
-
-        # Process each day
-        current_date = start_date
-        day_count = 0
-        start_time = time.time()
-
-        while current_date <= end_date and not interrupted:
-            day_count += 1
-            date_str = current_date.strftime("%Y-%m-%d")
-            day_start = time.time()
-
-            print(f"\n{'-'*70}")
-            print(f"[{day_count}/{total_days}] Processing date (player mode): {date_str}")
-            print(f"{'-'*70}")
-
-            # Execute player-mode extractor to get paipus for this day
-            try:
-                day_results = execute_date_room_player_extractor_py(
-                    target_date=date_str,
-                    target_room=config.target_room,
-                    headless_mode=config.headless_mode,
-                    fast_mode=config.fast_mode,
-                    output_file=output_file,
-                )
-            except Exception as e:  # noqa: BLE001 - want full traceback here
-                print(f"Error processing {date_str} (player mode): {e}")
-                import traceback
-                traceback.print_exc()
-                day_results = []
-
-            if interrupted:
-                print(f"\nCollection interrupted by user")
-                break
-
-            # date_room_extractor.py 已處理單日去重，這裡做跨日去重統計
-            new_paipus = 0
-            for paipu in day_results:
-                if paipu not in all_paipus:
-                    all_paipus.append(paipu)
-                    new_paipus += 1
-
-            # Save progress
-            try:
-                progress_data = {
-                    'mode': 'date_room_player',
-                    'target_room': config.target_room,
-                    'start_date': config.start_date,
-                    'end_date': config.end_date,
-                    'last_processed_date': date_str,
-                    'timestamp': time.time()
-                }
-                with open(progress_file, 'w', encoding='utf-8') as f:
-                    json.dump(progress_data, f, ensure_ascii=False, indent=2)
-                print(f"Progress saved: {date_str}")
-            except Exception as e:
-                print(f"Error saving progress: {e}")
-
-            day_elapsed = time.time() - day_start
-            total_elapsed = time.time() - start_time
-
-            print(f"\n{date_str} (player mode) completed:")
-            print(f"  Collected today: {len(day_results)} paipus")
-            print(f"  New today: {new_paipus} (after deduplication)")
-            print(f"  Cumulative total: {len(all_paipus)} unique paipus")
-            print(f"  Time today: {day_elapsed:.1f} seconds")
-            print(f"  Total time: {total_elapsed/60:.1f} minutes")
-
-            # Move to next day
-            current_date += timedelta(days=1)
-
-            if current_date <= end_date:
-                remaining_days = (end_date - current_date).days + 1
-                avg_time_per_day = total_elapsed / day_count
-                estimated_remaining = avg_time_per_day * remaining_days / 60
-                print(
-                    f"  Estimated remaining time: {estimated_remaining:.1f} "
-                    f"minutes ({remaining_days} days)",
-                )
-
-        total_time = time.time() - start_time
-        print(f"\n{'='*70}")
-        if interrupted:
-            print(f"date_room_player mode collection interrupted by user!")
-        else:
-            print(f"date_room_player mode collection completed!")
-            # Clean up progress file on completion
-            if os.path.exists(progress_file):
-                try:
-                    os.remove(progress_file)
-                    print("Progress file removed (task completed)")
-                except:
-                    pass
-
-        print(f"{'='*70}")
-        print(f"Total collected: {len(all_paipus)} unique paipu IDs")
-        print(f"Days processed: {day_count} days")
-        print(f"Total time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
-        if len(all_paipus) > 0 and total_time > 0:
-            print(f"Average speed: {len(all_paipus)/total_time*60:.1f} paipus/minute")
-        print(f"{'='*70}\n")
-
-    except Exception as e:  # noqa: BLE001 - want full traceback here
-        print(f"\ndate_room_player mode execution error: {e}")
-        import traceback
-        traceback.print_exc()
-        print(f"Collected {len(all_paipus)} paipus before error")
-
-    return all_paipus
-
+    Returns (None, None, None) if neither label is present on the page.
+    """
+    for label_text in (rank, get_rank_display_name(rank)):
+        try:
+            rank_label = driver.find_element(
+                By.XPATH,
+                f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{label_text}']",
+            )
+            checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
+            return rank_label, checkbox, label_text
+        except Exception:
+            continue
+    return None, None, None
 
 def setup_rank_selection(driver, target_ranks: List[str]):
     """Setup rank selection"""
@@ -760,53 +604,22 @@ def setup_rank_selection(driver, target_ranks: List[str]):
 
         # First deselect all ranks
         for rank in all_available_ranks:
-            try:
-                # Try English label
-                rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{rank}']")
-                checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
-
-                if checkbox.is_selected():
-                    print(f"Deselecting rank: {rank}")
-                    driver.execute_script("arguments[0].click();", rank_label)
-            except:
-                # Try Chinese label
-                try:
-                    chinese_rank = get_rank_display_name(rank)
-                    rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{chinese_rank}']")
-                    checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
-
-                    if checkbox.is_selected():
-                        print(f"Deselecting rank: {chinese_rank}")
-                        driver.execute_script("arguments[0].click();", rank_label)
-                except:
-                    continue
+            rank_label, checkbox, label_text = find_rank_checkbox(driver, rank)
+            if checkbox is not None and checkbox.is_selected():
+                print(f"Deselecting rank: {label_text}")
+                driver.execute_script("arguments[0].click();", rank_label)
 
         # Select target ranks
         for rank in target_ranks:
-            try:
-                # Try English label
-                rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{rank}']")
-                checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
-
-                if not checkbox.is_selected():
-                    print(f"Selecting rank: {rank}")
-                    driver.execute_script("arguments[0].click();", rank_label)
-                else:
-                    print(f"Rank {rank} already selected")
-            except:
-                # Try Chinese label
-                try:
-                    chinese_rank = get_rank_display_name(rank)
-                    rank_label = driver.find_element(By.XPATH, f"//span[contains(@class, 'MuiFormControlLabel-label') and text()='{chinese_rank}']")
-                    checkbox = rank_label.find_element(By.XPATH, "./preceding-sibling::span//input[@type='checkbox']")
-
-                    if not checkbox.is_selected():
-                        print(f"Selecting rank: {chinese_rank}")
-                        driver.execute_script("arguments[0].click();", rank_label)
-                    else:
-                        print(f"Rank {chinese_rank} already selected")
-                except Exception as e:
-                    print(f"Unable to select rank {rank}: {e}")
+            rank_label, checkbox, label_text = find_rank_checkbox(driver, rank)
+            if checkbox is None:
+                print(f"Unable to select rank {rank}")
+                continue
+            if not checkbox.is_selected():
+                print(f"Selecting rank: {label_text}")
+                driver.execute_script("arguments[0].click();", rank_label)
+            else:
+                print(f"Rank {label_text} already selected")
 
         # Wait for page update
         print("Rank selection configuration completed")
@@ -816,47 +629,10 @@ def setup_rank_selection(driver, target_ranks: List[str]):
 
 def get_top_players_urls(config: CrawlerConfig):
     """Automatically crawl leaderboard player URLs based on configuration"""
-    chrome_options = Options()
-
-    if config.headless_mode:
-        chrome_options.add_argument("--headless=new")
-
-    # Core fix: Do not use user-data-dir, use random port isolation
-    import random
-    remote_port = random.randint(9222, 65535)
-    chrome_options.add_argument(f"--remote-debugging-port={remote_port}")
-
-    # Core stability parameters
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-
-    # Disable various features that may cause conflicts
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-background-networking")
-    chrome_options.add_argument("--no-first-run")
-    chrome_options.add_argument("--no-default-browser-check")
-    chrome_options.add_argument("--disable-popup-blocking")
-    chrome_options.add_argument("--disable-infobars")
-    chrome_options.add_argument("--window-size=1920,1080")
-
-    # Prevent detection as automation tool
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-
-    # Log settings - strongly suppress all logs
-    chrome_options.add_argument("--log-level=3")
-    chrome_options.add_argument("--silent")
-    chrome_options.add_argument("--disable-logging")
-
-    # Set environment variables to suppress Chrome logs
-    os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-
-    driver = webdriver.Chrome(options=chrome_options)
-    apply_stealth_js(driver)  # Apply anti-detection
+    driver, remote_port = create_stealth_driver(
+        config.headless_mode,
+        ["--disable-infobars", "--window-size=1920,1080"],
+    )
     print(f"Chrome instance started (debug port: {remote_port})")
 
     all_player_urls = []
@@ -937,10 +713,10 @@ def get_top_players_urls(config: CrawlerConfig):
         print(f"Obtained {len(unique_player_urls)} unique player URLs (/12 mode)")
 
         if config.save_screenshots:
+            rank_suffix = "_".join(config.ranks).lower()
             print(f"\nVerification screenshots saved:")
             print(f"  - screenshot_rank_selection_verification.png (rank selection verification)")
             for period in config.time_periods:
-                rank_suffix = "_".join(config.ranks).lower()
                 print(f"  - screenshot_{period}_positive_ranking_{rank_suffix}.png ({get_period_display_name(period)})")
 
         return unique_player_urls
@@ -983,14 +759,14 @@ def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
 
                 all_player_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/player/']")
 
+                size = driver.get_window_size()
                 for link in all_player_links:
                     try:
                         location = link.location
-                        size = driver.get_window_size()
 
                         if size['width'] * 0.33 < location['x'] < size['width'] * 0.66:
                             player_links_in_positive.append(link)
-                    except:
+                    except Exception:
                         continue
 
                 print(f"Method 2 found {len(player_links_in_positive)} possible Positive ranking links")
@@ -1039,45 +815,7 @@ def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
 
 def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfig, output_file=None):
     """Process paipu fetching for a single player"""
-    chrome_options = Options()
-
-    if config.headless_mode:
-        chrome_options.add_argument("--headless=new")
-
-    # Core fix: Do not use user-data-dir, use random port isolation
-    import random
-    remote_port = random.randint(9222, 65535)
-    chrome_options.add_argument(f"--remote-debugging-port={remote_port}")
-
-    # Core stability parameters
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-
-    # Disable various features that may cause conflicts
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-background-networking")
-    chrome_options.add_argument("--no-first-run")
-    chrome_options.add_argument("--no-default-browser-check")
-    chrome_options.add_argument("--disable-popup-blocking")
-
-    # Prevent detection as automation tool
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-
-    # Log settings - strongly suppress all logs
-    chrome_options.add_argument("--log-level=3")
-    chrome_options.add_argument("--silent")
-    chrome_options.add_argument("--disable-logging")
-
-    # Set environment variables to suppress Chrome logs
-    os.environ['WDM_LOG_LEVEL'] = '0'
-    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
-
-    driver = webdriver.Chrome(options=chrome_options)
-    apply_stealth_js(driver)  # Apply anti-detection
+    driver, _ = create_stealth_driver(config.headless_mode)
 
     try:
         driver.get(url)
@@ -1114,7 +852,7 @@ def process_player(url, processed_paipu_ids, player_counts, config: CrawlerConfi
                     paipu_id = href.split("paipu=")[1].split("_")[0]
 
                     if paipu_id not in processed_paipu_ids:
-                        processed_paipu_ids.append(paipu_id)
+                        processed_paipu_ids.add(paipu_id)
                         player_counts[url] += 1
                         print(f"Wrote new paipu ({url}):", paipu_id)
 
@@ -1154,7 +892,8 @@ class PaipuSpider(scrapy.Spider):
         self.config = CrawlerConfig.from_json(config_path)
         self.config.validate()
 
-        self.processed_paipu_ids = []
+        # Set for O(1) membership dedup; IDs are persisted incrementally to the output file
+        self.processed_paipu_ids = set()
 
         # Decide usage method based on configuration mode
         if self.config.crawler_mode == "manual":
@@ -1165,14 +904,11 @@ class PaipuSpider(scrapy.Spider):
             self.player_urls = []
             for url in self.config.manual_player_urls:
                 # Ensure URL format is correct, add limit parameter
-                if "/player/" in url and "?limit=" not in url:
-                    url = f"{url}?limit={self.config.paipu_limit}"
-                elif "/player/" in url and "?limit=" in url:
-                    # URL already has limit parameter, use original URL
-                    pass
-                else:
+                if "/player/" not in url:
                     print(f"Skipping invalid URL format: {url}")
                     continue
+                if "?limit=" not in url:
+                    url = f"{url}?limit={self.config.paipu_limit}"
                 self.player_urls.append(url)
 
             print(f"Loaded {len(self.player_urls)} valid player URLs")
@@ -1201,7 +937,7 @@ class PaipuSpider(scrapy.Spider):
                 for line in file:
                     paipu_id = line.strip()
                     if paipu_id:
-                        self.processed_paipu_ids.append(paipu_id)
+                        self.processed_paipu_ids.add(paipu_id)
             print(f"Loaded {len(self.processed_paipu_ids)} processed paipu IDs")
         except FileNotFoundError:
             print(f"{self.config.output_filename} file not found, will create new file")
@@ -1212,26 +948,11 @@ class PaipuSpider(scrapy.Spider):
     def start_crawling(self, response):  # noqa: ARG002 - Scrapy callback signature
         # 以追加模式打開文件，用於即時寫入
         with open(self.config.output_filename, "a", encoding='utf-8') as output_file:
-            if self.config.crawler_mode == "date_room":
-                # date_room mode: Directly call collection function
-                date_room_paipus = collect_paipus_by_date_room(self.config, output_file)
-
-                # Add to processed_paipu_ids (avoid duplicates)
-                for paipu_id in date_room_paipus:
-                    if paipu_id not in self.processed_paipu_ids:
-                        self.processed_paipu_ids.append(paipu_id)
-
-                # End directly
-                self.spider_closed(None)
-
-            elif self.config.crawler_mode == "date_room_player":
-                # date_room_player mode: 每日呼叫 player 模式收集所有玩家頁面牌譜
-                date_room_paipus = collect_paipus_by_date_room_player(self.config, output_file)
-
-                for paipu_id in date_room_paipus:
-                    if paipu_id not in self.processed_paipu_ids:
-                        self.processed_paipu_ids.append(paipu_id)
-
+            if self.config.crawler_mode in ("date_room", "date_room_player"):
+                # date_room / date_room_player share one collector; player_mode visits every player's page
+                player_mode = self.config.crawler_mode == "date_room_player"
+                date_room_paipus = collect_paipus_by_date_room(self.config, output_file, player_mode=player_mode)
+                self.processed_paipu_ids.update(date_room_paipus)
                 self.spider_closed(None)
 
             else:
@@ -1273,20 +994,14 @@ class PaipuSpider(scrapy.Spider):
                 print(f"  Ranks: {', '.join([get_rank_display_name(r) for r in self.config.ranks])}")
 
         if self.config.save_screenshots and self.config.crawler_mode == "auto":
+            rank_suffix = "_".join(self.config.ranks).lower()
             print(f"\nVerification screenshots saved:")
             print(f"  - screenshot_rank_selection_verification.png (rank selection verification)")
             for period in self.config.time_periods:
-                rank_suffix = "_".join(self.config.ranks).lower()
                 print(f"  - screenshot_{period}_positive_ranking_{rank_suffix}.png ({get_period_display_name(period)})")
 
         print(f"\n所有數據已即時寫入到文件: {self.config.output_filename}")
         print(f"爬蟲執行完成！")
-
-    def write_to_file(self):
-        with open(self.config.output_filename, "w", encoding='utf-8') as file:
-            for paipu_id in self.processed_paipu_ids:
-                file.write(paipu_id + "\n")
-        print(f"Paipu IDs saved to {self.config.output_filename}")
 
 # Function to create default configuration file
 def create_default_config():
@@ -1353,10 +1068,8 @@ if __name__ == "__main__":
     # Execute command: scrapy crawl paipu_spider
 
     # If configuration file doesn't exist, create default configuration
-    import os
     if not os.path.exists("crawler_config.json"):
         create_default_config()
-        print("Created default configuration file: crawler_config.json")
         print("Please edit the configuration file to customize your crawl settings")
         print("\nAvailable configuration modes:")
         print("  - crawler_mode: 'auto' (automated)")
