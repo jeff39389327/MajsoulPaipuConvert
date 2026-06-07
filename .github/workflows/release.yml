@@ -115,11 +115,25 @@ jobs:
           path: dist_gui/*.exe
           if-no-files-found: error
 
+      # rolling 'latest' 預發佈版：先刪掉舊的 release 與 tag，下一步才會在「目前的 commit」重建。
+      # 否則 (a) softprops 不會移動既有 tag，release 會一直掛在舊 commit；(b) 若有人手動刪了
+      # release，殘留的舊 tag 會讓後續 release 仍掛在過時 commit。刪除失敗（不存在）即略過。
+      - name: Reset rolling 'latest' release + tag
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes 2>$null
+          gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/tags/latest" 2>$null
+          exit 0
+
       - name: Publish to Releases (rolling latest)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
+          target_commitish: ${{ github.sha }}
           name: Latest build
           prerelease: true
           body: |
