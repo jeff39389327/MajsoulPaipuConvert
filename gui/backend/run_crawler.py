@@ -19,12 +19,40 @@ import os
 import re
 import subprocess
 import sys
+import threading
 
 from . import bridge, paths
 
 _UUID_RE = re.compile(
     r"[0-9]{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
+
+
+def _count_ids(output_path: str) -> tuple[int, str | None]:
+    """數出輸出檔目前的 UUID 筆數與最後一筆 (供即時進度回報)。檔案不存在時回 (0, None)。"""
+    count, current = 0, None
+    try:
+        with open(output_path, "r", encoding="utf-8") as f:
+            for ln in f:
+                if _UUID_RE.search(ln):
+                    count += 1
+                    current = ln.strip()
+    except FileNotFoundError:
+        pass
+    return count, current
+
+
+def _watch_output(output_path: str, stop_evt: threading.Event) -> None:
+    """凍結模式下 process.start() 會阻塞主執行緒、無法逐行解析 stdout；改以背景執行緒輪詢
+    輸出檔 (spider 逐筆 append+flush 寫入)，收集數變動時 emit progress，讓前端的計數與
+    進度條會即時更新 (與 dev 模式的逐行解析等效)。"""
+    last = -1
+    while not stop_evt.is_set():
+        count, current = _count_ids(output_path)
+        if count != last:
+            last = count
+            bridge.progress("crawl", unit="id", count=count, total=None, current=current)
+        stop_evt.wait(0.8)
 
 
 def _write_config(params: dict) -> str:
@@ -93,27 +121,33 @@ def _run_scrapy_frozen(params: dict, output_path: str) -> None:
     inner = str(paths.inner_dir(params))
     if inner not in sys.path:
         sys.path.insert(0, inner)
-    with bridge.chdir(inner):
-        os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "paipu_project.settings")
-        from scrapy.crawler import CrawlerProcess  # noqa: WPS433 (frozen import)
-        from scrapy.utils.project import get_project_settings  # noqa: WPS433
 
-        # 凍結後不能用名稱啟動 spider：Scrapy 的 SpiderLoader 透過 pkgutil.iter_modules
-        # 掃描 SPIDER_MODULES 來探索 spider，但 PyInstaller 把模組封進 exe，frozen importer
-        # 的套件路徑列舉不到 bundle 進去的 paipu_project.spiders.PaipuSpider，
-        # process.crawl("paipu_spider") 會同步丟 "Spider not found"（這正是 GUI 看到的
-        # CRAWL_EXCEPTION）。改為直接 import 類別、以類別啟動，完全繞過名稱解析/探索。
-        from paipu_project.spiders.PaipuSpider import PaipuSpider  # noqa: WPS433
+    # process.start() 會阻塞主執行緒，故用背景執行緒輪詢輸出檔回報即時收集數 (進度條/計數會動)。
+    stop_evt = threading.Event()
+    watcher = threading.Thread(target=_watch_output, args=(output_path, stop_evt), daemon=True)
+    watcher.start()
+    try:
+        with bridge.chdir(inner):
+            os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "paipu_project.settings")
+            from scrapy.crawler import CrawlerProcess  # noqa: WPS433 (frozen import)
+            from scrapy.utils.project import get_project_settings  # noqa: WPS433
 
-        process = CrawlerProcess(get_project_settings())
-        process.crawl(PaipuSpider)
-        process.start()  # 阻塞直到完成
+            # 凍結後不能用名稱啟動 spider：Scrapy 的 SpiderLoader 透過 pkgutil.iter_modules
+            # 掃描 SPIDER_MODULES 來探索 spider，但 PyInstaller 把模組封進 exe，frozen importer
+            # 的套件路徑列舉不到 bundle 進去的 paipu_project.spiders.PaipuSpider，
+            # process.crawl("paipu_spider") 會同步丟 "Spider not found"（這正是 GUI 看到的
+            # CRAWL_EXCEPTION）。改為直接 import 類別、以類別啟動，完全繞過名稱解析/探索。
+            from paipu_project.spiders.PaipuSpider import PaipuSpider  # noqa: WPS433
 
-    # 凍結模式下無法即時逐行解析，改由輸出檔行數回報最終數量。
-    collected = 0
-    if os.path.exists(output_path):
-        with open(output_path, "r", encoding="utf-8") as f:
-            collected = sum(1 for ln in f if _UUID_RE.search(ln))
+            process = CrawlerProcess(get_project_settings())
+            process.crawl(PaipuSpider)
+            process.start()  # 阻塞直到完成
+    finally:
+        stop_evt.set()
+        watcher.join(timeout=2)
+
+    # 由輸出檔回報最終數量 (watcher 已停，避免與 stage_done 競寫 stdout)。
+    collected, _ = _count_ids(output_path)
     bridge.stage_done("crawl", collected=collected, output_file=output_path)
     bridge.done(ok=True)
 

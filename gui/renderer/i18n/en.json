@@ -18,6 +18,7 @@
   "btn.continue": "Continue",
   "btn.runDoctor": "Re-check environment",
   "btn.toDownload": "Go to download & convert",
+  "btn.openFolder": "Open folder",
 
   "status.idle": "Idle",
   "status.running": "Running…",
@@ -119,6 +120,7 @@
   "download.idle": "Not started",
   "download.summary": "Downloaded {dl} / {total}, converted {cv}",
   "download.done": "Done: {downloaded} / {total} converted successfully",
+  "download.outputDir": "Output folder (absolute path)",
   "download.phase.download": "Downloading",
   "download.phase.mjai": "Converting",
   "download.noInput": "No IDs to download; finish the previous step or set a list in settings",

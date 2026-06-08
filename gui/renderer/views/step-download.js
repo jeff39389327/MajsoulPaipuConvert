@@ -48,6 +48,16 @@ export function renderDownload(ctx, container) {
       setBar(dlBar, 1, 1);
       setBar(cvBar, 1, 1);
       label.textContent = t('download.done', { downloaded: ev.stats.downloaded ?? 0, total: ev.stats.total ?? 0 });
+      // 顯示輸出資料夾的「絕對路徑」並提供開啟按鈕，方便使用者直接找到產出的牌譜檔。
+      const dir = ev.stats.output_dir;
+      if (dir) {
+        result.innerHTML = '';
+        result.append(h('div', { class: 'notice ok' },
+          h('div', null, t('download.outputDir')),
+          h('div', { class: 'path' }, dir),
+          h('div', { class: 'actions' },
+            h('button', { class: 'ghost', onclick: () => ctx.api.openPath(dir) }, t('btn.openFolder')))));
+      }
     } else if (ev.type === 'error' && ev.fatal) {
       // t() 缺 key 時回傳原 key，故以「是否等於 key」判斷有無在地化字串，沒有就用 generic。
       const localized = ctx.t('error.' + ev.code);

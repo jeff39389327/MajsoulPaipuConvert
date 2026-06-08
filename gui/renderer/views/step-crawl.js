@@ -43,9 +43,12 @@ export function renderCrawl(ctx, container) {
       state.crawlOutputFile = ev.stats.output_file;
       label.textContent = t('crawl.done', { count: ev.stats.collected ?? 0 });
       result.innerHTML = '';
+      const out = ev.stats.output_file || '';
       result.append(h('div', { class: 'notice ok' },
         h('div', null, t('crawl.outputFile')),
-        h('div', { class: 'path' }, ev.stats.output_file || '')));
+        h('div', { class: 'path' }, out),
+        h('div', { class: 'actions' },
+          h('button', { class: 'ghost', onclick: () => ctx.api.showItem(out) }, t('btn.openFolder')))));
       result.append(h('div', { class: 'actions' },
         h('button', { class: 'primary', onclick: () => ctx.navigate('download') }, t('btn.toDownload'))));
     } else if (ev.type === 'error' && ev.fatal) {

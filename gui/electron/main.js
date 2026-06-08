@@ -1,7 +1,7 @@
 'use strict';
 // main —— Electron 主程序：建立視窗、管理設定/路徑、spawn 後端、轉發事件給 renderer。
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -143,6 +143,19 @@ function registerIpc() {
     const res = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'] });
     if (res.canceled || !res.filePaths.length) return null;
     return res.filePaths[0];
+  });
+
+  // 用系統檔案管理員開啟資料夾 / 於資料夾中標示某檔，方便使用者找到輸出。
+  ipcMain.handle('shell:openPath', async (_e, p) => {
+    if (!p) return false;
+    const err = await shell.openPath(p); // 成功回空字串
+    return !err;
+  });
+
+  ipcMain.handle('shell:showItem', (_e, p) => {
+    if (!p) return false;
+    shell.showItemInFolder(p);
+    return true;
   });
 
   ipcMain.handle('i18n:list', () => {

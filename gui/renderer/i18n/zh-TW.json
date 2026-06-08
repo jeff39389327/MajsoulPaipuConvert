@@ -18,6 +18,7 @@
   "btn.continue": "繼續",
   "btn.runDoctor": "重新檢查環境",
   "btn.toDownload": "進入下載與轉換",
+  "btn.openFolder": "開啟資料夾",
 
   "status.idle": "閒置",
   "status.running": "執行中…",
@@ -119,6 +120,7 @@
   "download.idle": "尚未開始",
   "download.summary": "下載 {dl} / {total}，已轉換 {cv}",
   "download.done": "完成：成功轉換 {downloaded} / {total} 筆",
+  "download.outputDir": "輸出資料夾（絕對路徑）",
   "download.phase.download": "下載中",
   "download.phase.mjai": "轉換中",
   "download.noInput": "尚無待下載的 ID，請先完成上一步或於設定指定清單",
