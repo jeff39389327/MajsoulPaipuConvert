@@ -35,7 +35,7 @@
   "settings.ms_password.label": "密碼",
   "settings.ms_password.hint": "僅保存在本機 config.env，不會上傳",
   "settings.res_version.label": "資源版本（進階）",
-  "settings.res_version.hint": "登入若回報 error 151 時才需填寫，平常留空",
+  "settings.res_version.hint": "平常留空即可；登入回報 error 151 時會自動抓取最新版本並重試，成功後自動寫回此處",
   "settings.collect_timing.label": "收集思考時間",
   "settings.collect_timing.hint": "在 MJAI 中加入每手的思考毫秒數（think_ms）",
   "settings.save_debug.label": "除錯模式",
@@ -130,6 +130,9 @@
   "log.hide": "隱藏原始輸出",
 
   "error.LOGIN_FAILED": "雀魂登入失敗，請確認帳號密碼（或 error 151 需更新資源版本）",
+  "error.VERSION_UPDATE_FAILED": "已自動更新資源版本但仍登入失敗（error 151），請至設定手動填入 MS_RES_VERSION",
+  "notice.VERSION_AUTO_UPDATING": "偵測到 error 151，正在自動更新資源版本並重新登入…",
+  "notice.VERSION_UPDATED": "已自動更新資源版本為 {version} 並重新登入成功",
   "error.SCRAPY_FAILED": "爬蟲程序非正常結束",
   "error.NO_PYTHON": "找不到 Python，請於設定指定 Python 路徑",
   "error.SPAWN_FAILED": "無法啟動後端程序",

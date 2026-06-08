@@ -51,6 +51,69 @@ def _bool_env(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() == "true"
 
 
+def _persist_res_version(work_dir: str, version: str) -> None:
+    """把成功登入的資源版本寫回 work_dir/config.env (MS_RES_VERSION)，下次直接可用、毋需再抓。"""
+    try:
+        import dotenv
+
+        path = os.path.join(work_dir, "config.env")
+        # quote_mode="never"：維持與 config.js 一致的 KEY=VALUE 純文字格式 (不加引號)。
+        dotenv.set_key(path, "MS_RES_VERSION", version, quote_mode="never")
+    except Exception:  # noqa: BLE001 持久化失敗不影響本次執行 (記憶體中已套用新版本)
+        pass
+
+
+async def _login_with_auto_update(downloader, username: str, password: str, work_dir: str) -> bool:
+    """登入雀魂；遇 error 151 (資源版本過期) 時自動抓最新版本、寫回 config.env 並重新登入。
+
+    候選順序：version.json 抓到的最新版本 -> ms_patch 內建預設值 (修正 GUI 寫入空值的情況)。
+    任一候選成功即持久化並回 True；全部失敗回 False (已 emit 對應錯誤事件)。"""
+    import ms_patch
+
+    try:
+        await ms_patch.login(downloader, username, password)
+        ms_patch.patch_downloader(downloader)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        if not ms_patch.is_resource_version_error(exc):
+            bridge.error("download", "LOGIN_FAILED", str(exc), fatal=True)
+            return False
+
+    # error 151：自動更新資源版本並重新登入 (重開)。
+    bridge.notice("download", "VERSION_AUTO_UPDATING")
+
+    # 以「第一次登入實際使用的版本」(空值會被 _res_version 解析為預設) 作為已試集合，
+    # 避免重複重試同一個剛失敗的版本。
+    tried = {ms_patch._res_version()}
+    candidates: list[str] = []
+    fetched = ms_patch.fetch_latest_res_version()
+    if fetched:
+        candidates.append(fetched)
+    candidates.append(ms_patch._DEFAULT_RES_VERSION)
+
+    for ver in candidates:
+        if not ver or ver in tried:
+            continue
+        tried.add(ver)
+        # _res_version() 於登入時才讀環境變數，故直接改 os.environ 即可即時生效。
+        os.environ["MS_RES_VERSION"] = ver
+        try:
+            await ms_patch.login(downloader, username, password)
+            ms_patch.patch_downloader(downloader)
+        except Exception as exc:  # noqa: BLE001
+            if ms_patch.is_resource_version_error(exc):
+                continue  # 此版本仍被拒，試下一個候選
+            bridge.error("download", "LOGIN_FAILED", str(exc), fatal=True)
+            return False
+        _persist_res_version(work_dir, ver)
+        bridge.notice("download", "VERSION_UPDATED", ver)
+        return True
+
+    bridge.error("download", "VERSION_UPDATE_FAILED",
+                 "已嘗試自動更新資源版本但仍登入失敗 (error 151)", fatal=True)
+    return False
+
+
 async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     import dotenv
 
@@ -107,11 +170,7 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     counters = {"dl": 0, "cv": 0}
 
     async with MajsoulPaipuDownloader() as downloader:
-        try:
-            await ms_patch.login(downloader, username, password)
-            ms_patch.patch_downloader(downloader)
-        except Exception as exc:  # noqa: BLE001
-            bridge.error("download", "LOGIN_FAILED", str(exc), fatal=True)
+        if not await _login_with_auto_update(downloader, username, password, work_dir):
             bridge.done(ok=False, exit_code=1)
             return
 

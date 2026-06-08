@@ -35,7 +35,7 @@
   "settings.ms_password.label": "パスワード",
   "settings.ms_password.hint": "ローカルの config.env にのみ保存、送信しません",
   "settings.res_version.label": "リソースバージョン（上級）",
-  "settings.res_version.hint": "ログインで error 151 が出る場合のみ入力、通常は空欄",
+  "settings.res_version.hint": "通常は空欄。error 151 時に最新バージョンを自動取得して再試行し、成功後ここに保存します",
   "settings.collect_timing.label": "思考時間を収集",
   "settings.collect_timing.hint": "MJAI に各手の思考ミリ秒（think_ms）を追加",
   "settings.save_debug.label": "デバッグモード",
@@ -130,6 +130,9 @@
   "log.hide": "生出力を隠す",
 
   "error.LOGIN_FAILED": "雀魂のログインに失敗。認証情報を確認してください（error 151 はリソースバージョン更新が必要）",
+  "error.VERSION_UPDATE_FAILED": "リソースバージョンを自動更新しましたがログインに失敗しました（error 151）。設定で MS_RES_VERSION を手動入力してください",
+  "notice.VERSION_AUTO_UPDATING": "error 151 を検出。リソースバージョンを自動更新して再ログインしています…",
+  "notice.VERSION_UPDATED": "リソースバージョンを {version} に自動更新して再ログインしました",
   "error.SCRAPY_FAILED": "クローラープロセスが異常終了しました",
   "error.NO_PYTHON": "Pythonが見つかりません。設定でパスを指定してください",
   "error.SPAWN_FAILED": "バックエンドプロセスを起動できませんでした",

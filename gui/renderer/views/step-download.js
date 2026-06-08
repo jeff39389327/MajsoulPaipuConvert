@@ -58,6 +58,14 @@ export function renderDownload(ctx, container) {
           h('div', { class: 'actions' },
             h('button', { class: 'ghost', onclick: () => ctx.api.openPath(dir) }, t('btn.openFolder')))));
       }
+    } else if (ev.type === 'notice') {
+      // 非致命通知（例如自動更新資源版本）：顯示提示但不中止流程。
+      const key = 'notice.' + ev.code;
+      const localized = ev.code === 'VERSION_UPDATED'
+        ? ctx.t(key, { version: ev.msg })
+        : ctx.t(key);
+      const text = localized === key ? (ev.msg || ev.code) : localized;
+      result.append(h('div', { class: 'notice' }, text));
     } else if (ev.type === 'error' && ev.fatal) {
       // t() 缺 key 時回傳原 key，故以「是否等於 key」判斷有無在地化字串，沒有就用 generic。
       const localized = ctx.t('error.' + ev.code);

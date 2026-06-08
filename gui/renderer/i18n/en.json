@@ -35,7 +35,7 @@
   "settings.ms_password.label": "Password",
   "settings.ms_password.hint": "Stored only in local config.env, never uploaded",
   "settings.res_version.label": "Resource version (advanced)",
-  "settings.res_version.hint": "Only needed if login returns error 151; leave blank otherwise",
+  "settings.res_version.hint": "Leave blank; on error 151 the latest version is fetched and retried automatically, then saved here",
   "settings.collect_timing.label": "Collect thinking time",
   "settings.collect_timing.hint": "Add per-move thinking ms (think_ms) into MJAI",
   "settings.save_debug.label": "Debug mode",
@@ -130,6 +130,9 @@
   "log.hide": "Hide raw output",
 
   "error.LOGIN_FAILED": "Mahjong Soul login failed; check credentials (or error 151 needs a new resource version)",
+  "error.VERSION_UPDATE_FAILED": "Auto-updated the resource version but login still failed (error 151); set MS_RES_VERSION manually in Settings",
+  "notice.VERSION_AUTO_UPDATING": "Detected error 151; auto-updating the resource version and re-logging in…",
+  "notice.VERSION_UPDATED": "Auto-updated the resource version to {version} and logged in again",
   "error.SCRAPY_FAILED": "The crawler process exited abnormally",
   "error.NO_PYTHON": "Python not found; set the Python path in settings",
   "error.SPAWN_FAILED": "Failed to start the backend process",

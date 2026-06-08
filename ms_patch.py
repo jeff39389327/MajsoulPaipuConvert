@@ -26,6 +26,7 @@ import importlib.util
 import json
 import os
 import types
+import urllib.request
 import uuid
 
 import ms.protocol_pb2 as pb  # 來自 ms-api，與 tensoul 套件無關
@@ -42,9 +43,20 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
 
+# 雀魂 CN web 客戶端的版本資訊端點；error 151 時用來自動抓取最新資源版本。
+# 可用 MS_VERSION_URL 覆寫 (例如雀魂改了路徑)。
+_VERSION_JSON_URL = os.getenv(
+    "MS_VERSION_URL", "https://game.maj-soul.com/1/version.json"
+)
+# 雀魂版本字串尾端帶伺服器代碼後綴 (CN web 為 ".w")；resource 版本不含此後綴。
+_VERSION_SUFFIXES = (".w", ".x", ".t")
+
 
 def _res_version() -> str:
-    return os.getenv("MS_RES_VERSION", _DEFAULT_RES_VERSION)
+    # 注意：GUI 在使用者留空「資源版本」欄位時會寫入 MS_RES_VERSION= (空字串)，
+    # 而 os.getenv 對「存在但為空」的鍵不會回退預設，導致送出 version_str="WebGL_2022-"
+    # 而被伺服器以 error 151 拒絕。故此處將空字串一律視為「未設定」，回退預設值。
+    return os.getenv("MS_RES_VERSION", "").strip() or _DEFAULT_RES_VERSION
 
 
 def _client_version_string() -> str:
@@ -135,6 +147,29 @@ async def login(dl, account: str, password: str) -> str:
     await dl.lobby.login_beat(beat)
     dl.token = res.access_token
     return res.access_token
+
+
+def fetch_latest_res_version(timeout: float = 10.0) -> str | None:
+    """向雀魂 CN 取得目前資源版本 (version.json 的 version 去掉伺服器後綴，如 0.16.230.w -> 0.16.230)。
+
+    供 error 151 (資源版本過期) 時自動更新使用。網路失敗或格式不符回 None。"""
+    try:
+        req = urllib.request.Request(_VERSION_JSON_URL, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 網路/解析任何失敗都當作取不到，交由呼叫端回退
+        return None
+    ver = str(data.get("version") or "").strip()
+    for suffix in _VERSION_SUFFIXES:
+        if ver.endswith(suffix):
+            ver = ver[: -len(suffix)]
+            break
+    return ver or None
+
+
+def is_resource_version_error(exc: BaseException) -> bool:
+    """判斷例外是否為雀魂 error 151 (client_version_string 不符 / 資源版本過期)。"""
+    return "code=151" in str(exc)
 
 
 def patch_downloader(dl) -> None:
