@@ -66,7 +66,7 @@ hiddenimports += [
     'scrapy.squeues',
     'scrapy.pqueues',
     # 本 repo 既有模組（凍結後仍需 import）
-    'toumajsoul', 'ms_patch', 'date_room_extractor',
+    'toumajsoul', 'ms_patch', 'date_room_extractor', 'config_store',
     'paipu_project.settings', 'paipu_project.spiders.PaipuSpider',
     # protobuf runtime
     'google.protobuf', 'google.protobuf.json_format',

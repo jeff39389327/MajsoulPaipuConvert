@@ -95,6 +95,13 @@ export function renderSettings(ctx, container) {
   container.append(field(t('settings.locale.label'),
     select(localeOptions, form.locale, (v) => { form.locale = v; ctx.setLocale(v); })));
 
+  // --- 設定檔 ---
+  container.append(h('div', { class: 'section-title' }, t('settings.section.config')));
+  const openCfgBtn = h('button', { class: 'ghost', onclick: () => ctx.api.revealConfig() }, t('btn.openConfig'));
+  container.append(field(t('settings.config.label'),
+    h('div', { class: 'inline-input' }, h('span', { class: 'path' }, state.configPath || '—'), openCfgBtn),
+    t('settings.config.hint')));
+
   // --- 關於與更新 ---
   container.append(h('div', { class: 'section-title' }, t('settings.section.about')));
   const verText = state.appVersion ? 'v' + state.appVersion : '—';

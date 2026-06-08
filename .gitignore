@@ -23,6 +23,8 @@ venv/
 .venv/
 env/
 config.env
+# 單一設定檔（含帳密；GUI/CLI 共用，與執行檔同層）。範本見 config.ini.example。
+config.ini
 
 # 第三方庫 tensoul-py-ng 已直接納入本 repo (MIT, https://github.com/unStatiK/tensoul-py-ng)；
 # 其執行時生成的 ms_cfg.json 由 tensoul-py-ng/.gitignore 自行忽略。

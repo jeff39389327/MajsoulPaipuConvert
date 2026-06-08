@@ -1,0 +1,48 @@
+# MajsoulPaipuGUI / CLI 單一設定檔範本
+# ------------------------------------------------------------------
+# 複製本檔為 config.ini（放在執行檔同層；CLI 則放 repo 根目錄）後填入即可。
+# GUI 會自動讀寫此檔，升級時自動保留（另備援於使用者資料夾）。
+# 也可手動編輯：布林用 true/false，多值（time_periods/ranks/...）以逗號分隔。
+# 缺檔時 CLI（toumajsoul.py）會回退讀舊的 config.env。
+
+[account]
+# 雀魂中國伺服器（maj-soul.com）帳密 —— 純 API 登入，免瀏覽器、免 token。
+ms_username = your_email@example.com
+ms_password = your_password
+# 大改版後若登入回 error 151，GUI 會自動抓最新版本、重試並寫回此值；平常留空即可。
+ms_res_version =
+
+[download]
+# 思考時間：在 MJAI 中加入每手 think_ms（預設 true）。
+collect_timing = true
+# 另存思考時間對照表與原始動作，供除錯（預設 false）。
+save_debug = false
+# 保存雀魂原始 GameDetailRecords JSON（啟用會自動開啟 collect_timing）。
+save_raw_json = true
+# 效能：同時下載數（建議 3）／同時轉換數（0＝依 CPU 核心自動）／強制逐筆下載。
+download_concurrency = 3
+convert_concurrency = 0
+sequential_download = false
+
+[crawler]
+# 最後一次使用的爬取設定（GUI 會覆寫；CLI 直接以此產生 crawler_config.json 依據）。
+crawler_mode = date_room
+output_filename = date_room_list.txt
+headless_mode = true
+fast_mode = false
+paipu_limit = 9999
+time_periods =
+ranks =
+max_players_per_period = 20
+save_screenshots = true
+manual_player_urls =
+start_date =
+end_date =
+target_room = Jade
+
+[app]
+# GUI 偏好。work_dir 留空＝執行檔同層；locale 留空＝跟隨系統。
+work_dir =
+python_path =
+locale =
+auto_download_after_crawl = true

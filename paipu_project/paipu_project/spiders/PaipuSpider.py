@@ -27,6 +27,14 @@ import logging
 for _noisy_logger in ("selenium", "selenium.webdriver.remote.remote_connection", "urllib3"):
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
+# date_room_api 模式：純 amae-koromo API 取牌譜 UUID（無 Selenium）。scrapy/frozen 都以
+# 套件 paipu_project.spiders 載入本檔，故相對匯入為主；直接執行 PaipuSpider.py（CWD=spiders）
+# 時退回絕對匯入。
+try:
+    from .akoromo_api import collect_room_paipus
+except ImportError:  # pragma: no cover - 直接執行 / CWD=spiders 後備
+    from akoromo_api import collect_room_paipus
+
 @dataclass
 class CrawlerConfig:
     """Crawler configuration class"""
@@ -110,7 +118,7 @@ class CrawlerConfig:
 
     def validate(self):
         """Validate configuration validity"""
-        valid_modes = ["auto", "manual", "date_room", "date_room_player"]
+        valid_modes = ["auto", "manual", "date_room", "date_room_player", "date_room_api"]
         valid_periods = ["4w", "1w", "3d", "1d"]
         valid_ranks = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East", "All"]
         valid_rooms = ["Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"]
@@ -143,7 +151,7 @@ class CrawlerConfig:
 
             print(f"Auto mode configuration validated")
 
-        elif self.crawler_mode in ("date_room", "date_room_player"):
+        elif self.crawler_mode in ("date_room", "date_room_player", "date_room_api"):
             # Validate date format and required parameters
             if not self.start_date or not self.end_date:
                 raise ValueError(f"{self.crawler_mode} mode requires start_date and end_date")
@@ -930,9 +938,9 @@ class PaipuSpider(scrapy.Spider):
             print(f"Loaded {len(self.player_urls)} valid player URLs")
             self.player_counts = {url: 0 for url in self.player_urls}
 
-        elif self.config.crawler_mode in ("date_room", "date_room_player"):
+        elif self.config.crawler_mode in ("date_room", "date_room_player", "date_room_api"):
             print(f"Using {self.config.crawler_mode} mode...")
-            # date_room / date_room_player 模式都不需要預先的 player_urls
+            # date_room / date_room_player / date_room_api 模式都不需要預先的 player_urls
             self.player_urls = []
             self.player_counts = {}
 
@@ -964,7 +972,19 @@ class PaipuSpider(scrapy.Spider):
     def start_crawling(self, response):  # noqa: ARG002 - Scrapy callback signature
         # 以追加模式打開文件，用於即時寫入
         with open(self.config.output_filename, "a", encoding='utf-8') as output_file:
-            if self.config.crawler_mode in ("date_room", "date_room_player"):
+            if self.config.crawler_mode == "date_room_api":
+                # 純 amae-koromo API 直取（無 Selenium）：依房間+日期收集完整 UUID。
+                # collect_room_paipus 會即時 write+flush 並把新 UUID 加進 processed set。
+                collect_room_paipus(
+                    self.config.target_room,
+                    self.config.start_date,
+                    self.config.end_date,
+                    output_file=output_file,
+                    existing_ids=self.processed_paipu_ids,
+                )
+                self.spider_closed(None)
+
+            elif self.config.crawler_mode in ("date_room", "date_room_player"):
                 # date_room / date_room_player share one collector; player_mode visits every player's page
                 player_mode = self.config.crawler_mode == "date_room_player"
                 date_room_paipus = collect_paipus_by_date_room(self.config, output_file, player_mode=player_mode)
@@ -983,7 +1003,7 @@ class PaipuSpider(scrapy.Spider):
     def spider_closed(self, reason):  # noqa: ARG002 - Scrapy hook signature
         print(f"Total collected {len(self.processed_paipu_ids)} unique paipu IDs")
 
-        if self.config.crawler_mode in ("date_room", "date_room_player"):
+        if self.config.crawler_mode in ("date_room", "date_room_player", "date_room_api"):
             print(f"\n{self.config.crawler_mode} mode configuration summary:")
             print(f"  Date range: {self.config.start_date} to {self.config.end_date}")
             print(f"  Target room: {self.config.target_room}")

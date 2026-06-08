@@ -1,91 +1,134 @@
 'use strict';
-// config —— Node 端讀寫 config.env 與 crawler_config.json。
+// config —— 單一 config.ini 與「renderer / 後端面向的形狀」之間的映射層。
 //
-// config.env       : dotenv 格式 (KEY=VALUE)，逐行解析、保留註解、就地更新；缺檔以
-//                    config.env.example 為模板生成。帳密只存此檔 (已 gitignored)。
-// crawler_config   : 純 JSON，欄位即 CrawlerConfig dataclass；依 crawler_mode 由前端決定顯示。
+// 全部設定集中於一個 config.ini（見 configIni.js）。本模組把它投影成三種既有形狀，讓
+// renderer 與 main.js 幾乎不用改：
+//   - env      : {ms_username, ms_password, MS_RES_VERSION, COLLECT_TIMING, SAVE_DEBUG, SAVE_RAW_JSON}
+//   - crawler  : CrawlerConfig 物件（陣列 / 數字 / 布林已還原型別）
+//   - settings : {workDir, pythonPath, locale, autoDownloadAfterCrawl, downloadConcurrency,
+//                 convertConcurrency, sequentialDownload}
+// 三者讀寫的是同一個 config.ini 的不同區段；每次寫入皆 read-modify-write 整檔並鏡像備援。
 
 const fs = require('fs');
-const path = require('path');
+const configIni = require('./configIni');
 
-// config.env 中由 GUI 管理的鍵 (與 config.env.example / toumajsoul.py 對齊)。
-const ENV_KEYS = [
-  'ms_username',
-  'ms_password',
-  'MS_RES_VERSION',
-  'COLLECT_TIMING',
-  'SAVE_DEBUG',
-  'SAVE_RAW_JSON',
-];
+// ---- env（[account] + [download] 旗標）----------------------------------
+// 環境變數名稱 -> (section, key)。鍵與 Python 端 config_store._ENV_MAP 對齊。
+const ENV_TO_INI = {
+  ms_username: ['account', 'ms_username'],
+  ms_password: ['account', 'ms_password'],
+  MS_RES_VERSION: ['account', 'ms_res_version'],
+  COLLECT_TIMING: ['download', 'collect_timing'],
+  SAVE_DEBUG: ['download', 'save_debug'],
+  SAVE_RAW_JSON: ['download', 'save_raw_json'],
+};
 
-function envPath(workDir) {
-  return path.join(workDir, 'config.env');
-}
-
-function examplePath(repoRoot) {
-  return path.join(repoRoot, 'config.env.example');
-}
-
-// 把一行解析成 { key, value } 或 null (註解/空行)。
-function parseEnvLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) return null;
-  const idx = trimmed.indexOf('=');
-  if (idx < 0) return null;
-  return { key: trimmed.slice(0, idx).trim(), value: trimmed.slice(idx + 1).trim() };
-}
-
-// 讀取 config.env，回傳已知鍵的物件 (缺檔回空物件)。
-function readEnv(workDir) {
+function readEnv(primaryPath, mirrorPath) {
+  const obj = configIni.readObj(primaryPath, mirrorPath);
   const out = {};
-  const p = envPath(workDir);
-  if (!fs.existsSync(p)) return out;
-  const text = fs.readFileSync(p, 'utf-8');
-  for (const line of text.split(/\r?\n/)) {
-    const kv = parseEnvLine(line);
-    if (kv && ENV_KEYS.includes(kv.key)) out[kv.key] = kv.value;
+  for (const [envKey, [s, k]] of Object.entries(ENV_TO_INI)) {
+    out[envKey] = (obj[s] && obj[s][k]) || '';
   }
   return out;
 }
 
-// 寫入/更新 config.env：保留既有註解與順序，就地更新存在的鍵，缺檔則以 example 為模板。
-function writeEnv(workDir, repoRoot, values) {
-  const p = envPath(workDir);
-  let lines;
-  if (fs.existsSync(p)) {
-    lines = fs.readFileSync(p, 'utf-8').split(/\r?\n/);
-  } else if (fs.existsSync(examplePath(repoRoot))) {
-    lines = fs.readFileSync(examplePath(repoRoot), 'utf-8').split(/\r?\n/);
-  } else {
-    lines = [];
-  }
-
-  const remaining = new Set(Object.keys(values));
-  const updated = lines.map((line) => {
-    const kv = parseEnvLine(line);
-    if (kv && Object.prototype.hasOwnProperty.call(values, kv.key)) {
-      remaining.delete(kv.key);
-      return `${kv.key}=${values[kv.key]}`;
+function writeEnv(primaryPath, mirrorPath, values) {
+  const obj = configIni.readObj(primaryPath, mirrorPath);
+  for (const [envKey, [s, k]] of Object.entries(ENV_TO_INI)) {
+    if (Object.prototype.hasOwnProperty.call(values, envKey)) {
+      obj[s] = obj[s] || {};
+      obj[s][k] = String(values[envKey] != null ? values[envKey] : '');
     }
-    return line;
-  });
-
-  // 模板/既有檔沒有的鍵 -> 追加到檔尾
-  for (const key of remaining) {
-    updated.push(`${key}=${values[key]}`);
   }
-
-  fs.writeFileSync(p, updated.join('\n'), 'utf-8');
-  return true;
+  return configIni.writeObj(primaryPath, mirrorPath, obj);
 }
 
-function crawlerConfigPath(innerDir) {
-  return path.join(innerDir, 'crawler_config.json');
+// ---- crawler（[crawler]）------------------------------------------------
+const CRAWLER_LIST = new Set(['time_periods', 'ranks', 'manual_player_urls']);
+const CRAWLER_INT = new Set(['paipu_limit', 'max_players_per_period']);
+const CRAWLER_BOOL = new Set(['headless_mode', 'fast_mode', 'save_screenshots']);
+
+function readCrawler(primaryPath, mirrorPath) {
+  const obj = configIni.readObj(primaryPath, mirrorPath);
+  const sec = obj.crawler || {};
+  const out = {};
+  for (const [k, v] of Object.entries(sec)) {
+    if (CRAWLER_LIST.has(k)) {
+      out[k] = v ? v.split(',').map((x) => x.trim()).filter(Boolean) : [];
+    } else if (CRAWLER_INT.has(k)) {
+      out[k] = v === '' ? undefined : Number(v);
+    } else if (CRAWLER_BOOL.has(k)) {
+      out[k] = v === 'true';
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
-function readCrawlerConfig(innerDir) {
-  const p = crawlerConfigPath(innerDir);
-  if (!fs.existsSync(p)) return null;
+function writeCrawler(primaryPath, mirrorPath, cfg) {
+  const obj = configIni.readObj(primaryPath, mirrorPath);
+  obj.crawler = obj.crawler || {};
+  // buildConfig() 只帶該模式相關欄位 → 合併進既有區段（其餘鍵保留）。
+  for (const [k, v] of Object.entries(cfg || {})) {
+    obj.crawler[k] = Array.isArray(v) ? v.join(',') : String(v);
+  }
+  return configIni.writeObj(primaryPath, mirrorPath, obj);
+}
+
+// ---- settings（[app] + [download] 效能鍵）-------------------------------
+// settings 物件鍵 -> (section, key)。
+const APP_TO_INI = {
+  workDir: ['app', 'work_dir'],
+  pythonPath: ['app', 'python_path'],
+  locale: ['app', 'locale'],
+  autoDownloadAfterCrawl: ['app', 'auto_download_after_crawl'],
+  downloadConcurrency: ['download', 'download_concurrency'],
+  convertConcurrency: ['download', 'convert_concurrency'],
+  sequentialDownload: ['download', 'sequential_download'],
+};
+const APP_BOOL = new Set(['autoDownloadAfterCrawl', 'sequentialDownload']);
+const APP_INT = new Set(['downloadConcurrency', 'convertConcurrency']);
+
+function readSettings(primaryPath, mirrorPath) {
+  const obj = configIni.readObj(primaryPath, mirrorPath);
+  const out = {};
+  for (const [key, [s, k]] of Object.entries(APP_TO_INI)) {
+    const v = (obj[s] && obj[s][k] != null) ? obj[s][k] : '';
+    if (APP_BOOL.has(key)) out[key] = v === 'true';
+    else if (APP_INT.has(key)) out[key] = Number(v || '0');
+    else out[key] = v;
+  }
+  return out;
+}
+
+function writeSettings(primaryPath, mirrorPath, patch) {
+  const obj = configIni.readObj(primaryPath, mirrorPath);
+  for (const [key, [s, k]] of Object.entries(APP_TO_INI)) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      obj[s] = obj[s] || {};
+      const v = patch[key];
+      obj[s][k] = typeof v === 'boolean' ? String(v) : String(v != null ? v : '');
+    }
+  }
+  return configIni.writeObj(primaryPath, mirrorPath, obj);
+}
+
+// ---- 舊設定遷移（首次啟動）---------------------------------------------
+// 把舊的 config.env（dotenv 文字）解析成 {KEY: value}。
+function parseEnvFile(text) {
+  const out = {};
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf('=');
+    if (idx < 0) continue;
+    out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return out;
+}
+
+function readJsonSafe(p) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch (_) {
@@ -93,17 +136,22 @@ function readCrawlerConfig(innerDir) {
   }
 }
 
-function writeCrawlerConfig(innerDir, config) {
-  const p = crawlerConfigPath(innerDir);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(config, null, 2), 'utf-8');
-  return true;
+function readTextSafe(p) {
+  try {
+    return fs.readFileSync(p, 'utf-8');
+  } catch (_) {
+    return null;
+  }
 }
 
 module.exports = {
-  ENV_KEYS,
   readEnv,
   writeEnv,
-  readCrawlerConfig,
-  writeCrawlerConfig,
+  readCrawler,
+  writeCrawler,
+  readSettings,
+  writeSettings,
+  parseEnvFile,
+  readJsonSafe,
+  readTextSafe,
 };

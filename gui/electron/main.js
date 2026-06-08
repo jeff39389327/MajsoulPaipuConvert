@@ -7,14 +7,31 @@ const path = require('path');
 
 const pyRunner = require('./pyRunner');
 const configStore = require('./config');
+const configIni = require('./configIni');
 const updater = require('./updater');
 const { REPO_ROOT, resolveBackend, isPackaged } = require('./pythonLocator');
 
 let mainWindow = null;
 
-// ---- 應用設定 (userData/gui-settings.json) -------------------------------
-function settingsFile() {
-  return path.join(app.getPath('userData'), 'gui-settings.json');
+// ---- 單一設定檔 config.ini -----------------------------------------------
+// primary：使用者選定的「執行檔同層」(dev 為 repo root)；mirror：userData 備援。
+// 升級(NSIS)會清掉同層檔，故每次寫入同步鏡像、開機自動還原（見 configIni.js）。
+let CONFIG = { primary: '', mirror: '' };
+
+function resolveConfigPaths() {
+  const mirror = path.join(app.getPath('userData'), 'config.ini');
+  if (!isPackaged()) {
+    return { primary: path.join(REPO_ROOT, 'config.ini'), mirror };
+  }
+  const exeDir = path.dirname(app.getPath('exe'));
+  try {
+    fs.mkdirSync(exeDir, { recursive: true });
+    fs.accessSync(exeDir, fs.constants.W_OK);
+    return { primary: path.join(exeDir, 'config.ini'), mirror };
+  } catch (_) {
+    // 同層不可寫（如裝在 Program Files）→ 直接以 userData 當 primary。
+    return { primary: mirror, mirror };
+  }
 }
 
 function defaultSettings() {
@@ -31,17 +48,48 @@ function defaultSettings() {
 }
 
 function loadSettings() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
-    return Object.assign(defaultSettings(), raw);
-  } catch (_) {
-    return defaultSettings();
-  }
+  return Object.assign(defaultSettings(), configStore.readSettings(CONFIG.primary, CONFIG.mirror));
 }
 
 function saveSettings(s) {
-  fs.mkdirSync(path.dirname(settingsFile()), { recursive: true });
-  fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2), 'utf-8');
+  configStore.writeSettings(CONFIG.primary, CONFIG.mirror, s);
+}
+
+// 首次啟動（尚無 config.ini，也無鏡像可還原）→ 把舊的 gui-settings.json / config.env /
+// crawler_config.json 一次性遷入 config.ini，既有使用者不丟設定。
+function migrateLegacyIfNeeded() {
+  if (fs.existsSync(CONFIG.primary)) return;
+
+  const guiSettings = configStore.readJsonSafe(path.join(app.getPath('userData'), 'gui-settings.json'));
+  const legacyWorkDir = (guiSettings && guiSettings.workDir) || defaultWorkDir();
+  const envText = configStore.readTextSafe(path.join(legacyWorkDir, 'config.env'))
+    || configStore.readTextSafe(path.join(REPO_ROOT, 'config.env'));
+  const env = envText ? configStore.parseEnvFile(envText) : {};
+  const innerDir = isPackaged() ? legacyWorkDir : path.join(REPO_ROOT, 'paipu_project', 'paipu_project');
+  const crawler = configStore.readJsonSafe(path.join(innerDir, 'crawler_config.json')) || {};
+
+  // 先寫骨架（即使無任何舊檔，也確保 config.ini 成形）。
+  configStore.writeSettings(CONFIG.primary, CONFIG.mirror, {});
+
+  const ENV_KEYS = ['ms_username', 'ms_password', 'MS_RES_VERSION', 'COLLECT_TIMING', 'SAVE_DEBUG', 'SAVE_RAW_JSON'];
+  const pickEnv = {};
+  for (const k of ENV_KEYS) if (env[k] != null) pickEnv[k] = env[k];
+  if (Object.keys(pickEnv).length) configStore.writeEnv(CONFIG.primary, CONFIG.mirror, pickEnv);
+
+  if (crawler && Object.keys(crawler).length) {
+    configStore.writeCrawler(CONFIG.primary, CONFIG.mirror, crawler);
+  }
+  if (guiSettings) {
+    configStore.writeSettings(CONFIG.primary, CONFIG.mirror, {
+      workDir: guiSettings.workDir || '',
+      pythonPath: guiSettings.pythonPath || '',
+      locale: guiSettings.locale || '',
+      autoDownloadAfterCrawl: guiSettings.autoDownloadAfterCrawl !== false,
+      downloadConcurrency: guiSettings.downloadConcurrency != null ? guiSettings.downloadConcurrency : 3,
+      convertConcurrency: guiSettings.convertConcurrency != null ? guiSettings.convertConcurrency : 0,
+      sequentialDownload: !!guiSettings.sequentialDownload,
+    });
+  }
 }
 
 let settings = null;
@@ -122,6 +170,7 @@ function registerIpc() {
     return {
       settings,
       paths: derivePaths(),
+      configPath: CONFIG.primary, // 單一設定檔位置（設定頁顯示 + 可開啟）
       packaged: isPackaged(),
       appVersion: app.getVersion(),
       systemLocale: app.getLocale(),
@@ -177,28 +226,36 @@ function registerIpc() {
     return locales;
   });
 
-  ipcMain.handle('config:read', () => {
-    const { workDir, innerDir } = derivePaths();
-    return {
-      env: configStore.readEnv(workDir),
-      crawler: configStore.readCrawlerConfig(innerDir),
-    };
-  });
+  ipcMain.handle('config:read', () => ({
+    env: configStore.readEnv(CONFIG.primary, CONFIG.mirror),
+    crawler: configStore.readCrawler(CONFIG.primary, CONFIG.mirror),
+  }));
 
-  ipcMain.handle('config:writeEnv', (_e, values) => {
-    const { workDir, repoRoot } = derivePaths();
-    return configStore.writeEnv(workDir, repoRoot, values || {});
-  });
+  ipcMain.handle('config:writeEnv', (_e, values) =>
+    configStore.writeEnv(CONFIG.primary, CONFIG.mirror, values || {}));
 
-  ipcMain.handle('config:writeCrawler', (_e, cfg) => {
-    const { innerDir } = derivePaths();
-    return configStore.writeCrawlerConfig(innerDir, cfg || {});
+  ipcMain.handle('config:writeCrawler', (_e, cfg) =>
+    configStore.writeCrawler(CONFIG.primary, CONFIG.mirror, cfg || {}));
+
+  // 用系統檔案管理員開啟並標示 config.ini（設定頁的「開啟設定檔位置」按鈕）。
+  ipcMain.handle('config:reveal', () => {
+    if (CONFIG.primary && fs.existsSync(CONFIG.primary)) {
+      shell.showItemInFolder(CONFIG.primary);
+      return true;
+    }
+    return false;
   });
 
   ipcMain.handle('job:start', (_e, { kind, params }) => {
     const { repoRoot, workDir, innerDir } = derivePaths();
     const merged = Object.assign(
-      { repo_root: repoRoot, work_dir: workDir, inner_dir: innerDir },
+      {
+        repo_root: repoRoot,
+        work_dir: workDir,
+        inner_dir: innerDir,
+        config_ini_path: CONFIG.primary,   // 後端讀帳密/旗標、寫回 MS_RES_VERSION
+        config_ini_mirror: CONFIG.mirror,  // 升級備援：同步寫一份到 userData
+      },
       params || {}
     );
     // 為下載 job 注入並發設定
@@ -214,6 +271,9 @@ function registerIpc() {
 }
 
 app.whenReady().then(() => {
+  CONFIG = resolveConfigPaths();
+  configIni.restoreFromMirror(CONFIG.primary, CONFIG.mirror); // 同層檔被升級洗掉 → 由鏡像還原
+  migrateLegacyIfNeeded();                                    // 首次啟動：遷入舊設定檔
   settings = loadSettings();
   registerIpc();
   createWindow();

@@ -17,10 +17,11 @@ contextBridge.exposeInMainWorld('api', {
   // i18n 語系資料
   loadLocales: () => ipcRenderer.invoke('i18n:list'),
 
-  // 設定檔讀寫 (config.env / crawler_config.json)
+  // 設定檔讀寫 (單一 config.ini 的 [account]/[download]/[crawler] 區段)
   readConfig: () => ipcRenderer.invoke('config:read'),
   writeEnv: (values) => ipcRenderer.invoke('config:writeEnv', values),
   writeCrawler: (cfg) => ipcRenderer.invoke('config:writeCrawler', cfg),
+  revealConfig: () => ipcRenderer.invoke('config:reveal'),
 
   // job 控制
   startJob: (kind, params) => ipcRenderer.invoke('job:start', { kind, params }),

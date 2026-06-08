@@ -15,6 +15,7 @@ const STEPS = [
 const state = {
   settings: null,
   paths: null,
+  configPath: '', // 單一 config.ini 的位置（設定頁顯示 + 可開啟）
   packaged: false,
   appVersion: '',
   systemLocale: 'en',
@@ -255,6 +256,7 @@ async function bootstrap() {
   const st = await window.api.getState();
   state.settings = st.settings;
   state.paths = st.paths;
+  state.configPath = st.configPath || '';
   state.packaged = st.packaged;
   state.appVersion = st.appVersion || '';
   state.systemLocale = st.systemLocale;

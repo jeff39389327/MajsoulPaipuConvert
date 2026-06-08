@@ -13,8 +13,8 @@
 - 轉換並發：mjai-reviewer 是外部 binary，可安全多開 -> Semaphore(convert_concurrency)
   (預設 = CPU 核心，上限 8)。吞吐主要來自這裡。
 
-帳密來源：不經 argv，改由 work_dir/config.env 讀取 (GUI 全面管理該檔)；params 僅帶
-非敏感的並發/旗標設定。
+帳密來源：不經 argv，改由單一 config.ini 讀取 (路徑由 params.config_ini_path 帶入，GUI 全面
+管理該檔；缺檔回退舊 config.env)；params 僅帶非敏感的並發/旗標設定。
 """
 from __future__ import annotations
 
@@ -51,19 +51,23 @@ def _bool_env(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() == "true"
 
 
-def _persist_res_version(work_dir: str, version: str) -> None:
-    """把成功登入的資源版本寫回 work_dir/config.env (MS_RES_VERSION)，下次直接可用、毋需再抓。"""
-    try:
-        import dotenv
+def _persist_res_version(ini_paths: list[str], version: str) -> None:
+    """把成功登入的資源版本寫回 config.ini 的 [account] ms_res_version，下次直接可用、毋需再抓。
 
-        path = os.path.join(work_dir, "config.env")
-        # quote_mode="never"：維持與 config.js 一致的 KEY=VALUE 純文字格式 (不加引號)。
-        dotenv.set_key(path, "MS_RES_VERSION", version, quote_mode="never")
-    except Exception:  # noqa: BLE001 持久化失敗不影響本次執行 (記憶體中已套用新版本)
-        pass
+    ini_paths 通常為 [primary(執行檔同層), mirror(userData)]：兩者都寫，確保升級洗掉同層檔後
+    仍能由 mirror 還原到最新版本。寫入失敗不影響本次執行（記憶體中已套用新版本）。"""
+    import config_store
+
+    for path in ini_paths:
+        if not path:
+            continue
+        try:
+            config_store.set_value(path, "account", "ms_res_version", version)
+        except Exception:  # noqa: BLE001 持久化失敗不影響本次執行
+            pass
 
 
-async def _login_with_auto_update(downloader, username: str, password: str, work_dir: str) -> bool:
+async def _login_with_auto_update(downloader, username: str, password: str, ini_paths: list[str]) -> bool:
     """登入雀魂；遇 error 151 (資源版本過期) 時自動抓最新版本、寫回 config.env 並重新登入。
 
     候選順序：version.json 抓到的最新版本 -> ms_patch 內建預設值 (修正 GUI 寫入空值的情況)。
@@ -105,7 +109,7 @@ async def _login_with_auto_update(downloader, username: str, password: str, work
                 continue  # 此版本仍被拒，試下一個候選
             bridge.error("download", "LOGIN_FAILED", str(exc), fatal=True)
             return False
-        _persist_res_version(work_dir, ver)
+        _persist_res_version(ini_paths, ver)
         bridge.notice("download", "VERSION_UPDATED", ver)
         return True
 
@@ -115,9 +119,14 @@ async def _login_with_auto_update(downloader, username: str, password: str, work
 
 
 async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
-    import dotenv
+    import config_store
 
-    dotenv.load_dotenv(os.path.join(work_dir, "config.env"))
+    # 單一設定檔 config.ini：primary 為「執行檔同層」(GUI 由 params 帶入)，mirror 為 userData
+    # 備援。缺檔時 load_into_env 會回退舊的 config.env。帳密 / 旗標皆由此載入 os.environ。
+    ini_primary = params.get("config_ini_path") or os.path.join(work_dir, "config.ini")
+    ini_mirror = params.get("config_ini_mirror") or ""
+    ini_paths = [p for p in (ini_primary, ini_mirror) if p]
+    config_store.load_into_env(ini_primary)
 
     # 既有模組需在 repo_root 下完成 import (tensoul-py-ng 相對路徑、ms_cfg)。
     cwd_for_import = os.getcwd()
@@ -170,7 +179,7 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     counters = {"dl": 0, "cv": 0}
 
     async with MajsoulPaipuDownloader() as downloader:
-        if not await _login_with_auto_update(downloader, username, password, work_dir):
+        if not await _login_with_auto_update(downloader, username, password, ini_paths):
             bridge.done(ok=False, exit_code=1)
             return
 

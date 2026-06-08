@@ -298,9 +298,10 @@ async def download_single_log(record_uuid, downloader, collect_timing=False):
         return None, None, None
 
 async def main():
-    # 載入環境變數
-    dotenv.load_dotenv("config.env")
-    
+    # 載入設定：優先 config.ini（單一設定檔），缺檔時回退舊的 config.env。
+    import config_store
+    config_store.load_into_env()
+
     username = os.getenv("ms_username", "cohipi3374@nausard.com")
     password = os.getenv("ms_password", "48764876")
     batch_size = 1

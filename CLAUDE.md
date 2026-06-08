@@ -76,7 +76,7 @@ Scrapy's request/scheduler engine for crawling. All scraping logic lives in:
   driver script and runs it as a **subprocess per day**, parsing paipu IDs from the subprocess's
   **stdout** (regex-matched UUID lines) while all logs/debug go to **stderr**.
 
-Four `crawler_mode` values:
+Five `crawler_mode` values:
 - `auto` — scrape leaderboard top players for given ranks/periods, then collect each player's games.
 - `manual` — use an explicit `manual_player_urls` list.
 - `date_room` — for each day in `[start_date, end_date]` and `target_room`, find each game and resolve
@@ -85,6 +85,15 @@ Four `crawler_mode` values:
   deprecated API path kept only as a fallback).
 - `date_room_player` — like `date_room` but visits **every** player's page per game for maximum
   coverage; supports **resume** via a `crawler_progress.json` checkpoint (deleted on clean completion).
+- `date_room_api` — same inputs as `date_room` (`start_date`/`end_date`/`target_room`) but **no Selenium**:
+  `spiders/akoromo_api.py` hits amae-koromo's backend JSON API directly. Because the room `games` endpoint
+  returns **masked** short-code uuids (`"_masked": true`), it de-masks each game via the `player_records`
+  endpoint (which returns the full `YYMMDD-…` uuid), time-matching on `startTime`. Two steps: enumerate the
+  room (time-sliced into 6 h windows to stay under the 500-row cap, auto-bisecting on overflow) → resolve
+  each game's full uuid (a per-`startTime` cache folds in whole player windows to cut requests). Runs
+  in-process inside `PaipuSpider.start_crawling` (no per-day subprocess); writes UUIDs incrementally like
+  the other modes. Faster and far more reliable than the Selenium `date_room`, but the API is rate-limited
+  (tune `_REQ_DELAY` in `akoromo_api.py`).
 
 Key Selenium realities to keep in mind when editing the extractor: the target site uses a
 `ReactVirtualized` table (rows are recycled on scroll, so element references go stale — the code
@@ -109,8 +118,13 @@ counter on each discard/call, **skipping cancelled calls**); `inject_timing_to_m
 in lock-step — any change to which events advance the counter on one side must mirror the other, or
 timings will misalign.
 
-Behavior is driven by `config.env` (loaded via python-dotenv): `ms_username`, `ms_password`,
-`COLLECT_TIMING`, `SAVE_DEBUG`, `SAVE_RAW_JSON` (setting `SAVE_RAW_JSON` force-enables `COLLECT_TIMING`).
+Behavior is driven by **`config.ini`** — the single unified settings file (sections `[account]`,
+`[download]`, `[crawler]`, `[app]`). `config_store.load_into_env()` loads `[account]`/`[download]`
+keys (`ms_username`, `ms_password`, `MS_RES_VERSION`, `COLLECT_TIMING`, `SAVE_DEBUG`, `SAVE_RAW_JSON`)
+into `os.environ`, so the existing `os.getenv`-based code (`toumajsoul.py`, `ms_patch.py`) is unchanged.
+Setting `SAVE_RAW_JSON` force-enables `COLLECT_TIMING`. If `config.ini` is absent, the loader falls back
+to the legacy `config.env` (python-dotenv) for backward compat. The GUI owns `config.ini`; on error 151,
+`run_download.py` writes the recovered `ms_res_version` back into it (see `config_store.set_value`).
 
 ## Gotchas
 
@@ -119,8 +133,12 @@ Behavior is driven by `config.env` (loaded via python-dotenv): `ms_username`, `m
   dir**, but `toumajsoul.py` runs from the repo root and **hardcodes reading `tonpuulist.txt`**
   (`toumajsoul.py:322`). After scraping you must copy the output to `tonpuulist.txt` in the repo root
   (or change the hardcoded name) before running Stage 2.
-- `toumajsoul.py` and `download.py` contain **hardcoded fallback credentials**; `config.env` overrides them.
-- `config.env` is gitignored — copy `config.env.example` to `config.env` and fill it in.
+- `toumajsoul.py` and `download.py` contain **hardcoded fallback credentials**; `config.ini` (or the
+  legacy `config.env` fallback) overrides them.
+- `config.ini` is gitignored (holds credentials) — copy `config.ini.example` to `config.ini` and fill
+  it in (CLI: at the repo root; GUI: next to the executable, auto-created/migrated). The GUI mirrors it
+  to `userData` and restores it on launch, so it survives electron-updater (NSIS) reinstalls that wipe
+  the install dir. The legacy `config.env` / `config.env.example` still work as a fallback for CLI use.
 
 ## Legacy / non-pipeline files (don't assume these are part of the main flow)
 

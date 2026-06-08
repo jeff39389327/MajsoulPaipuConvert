@@ -1,7 +1,7 @@
 // step-mode —— 選擇 crawler_mode 並填寫對應參數。label/value 分離：顯示翻譯、寫入英文原值。
 import { h, field, textInput, numberInput, toggle, chips, select } from './dom.js';
 
-const MODES = ['auto', 'manual', 'date_room', 'date_room_player'];
+const MODES = ['auto', 'manual', 'date_room', 'date_room_player', 'date_room_api'];
 const PERIODS = ['4w', '1w', '3d', '1d'];
 const RANKS = ['Throne', 'Jade', 'Gold', 'Throne East', 'Jade East', 'Gold East', 'All'];
 const ROOMS = ['Throne', 'Jade', 'Gold', 'Throne East', 'Jade East', 'Gold East'];
@@ -90,9 +90,13 @@ export function renderMode(ctx, container) {
 
   // 通用欄位
   fields.append(field(t('mode.field.output_filename'), textInput(form.output_filename, (v) => (form.output_filename = v))));
-  fields.append(field('', toggle(t('mode.field.headless'), form.headless_mode, (v) => (form.headless_mode = v))));
-  if (form.crawler_mode !== 'manual') {
-    fields.append(field('', toggle(t('mode.field.fast'), form.fast_mode, (v) => (form.fast_mode = v))));
+  // date_room_api 走純 HTTP API，不開瀏覽器，headless/fast 對它無意義，故隱藏。
+  const usesBrowser = form.crawler_mode !== 'date_room_api';
+  if (usesBrowser) {
+    fields.append(field('', toggle(t('mode.field.headless'), form.headless_mode, (v) => (form.headless_mode = v))));
+    if (form.crawler_mode !== 'manual') {
+      fields.append(field('', toggle(t('mode.field.fast'), form.fast_mode, (v) => (form.fast_mode = v))));
+    }
   }
   container.append(fields);
 

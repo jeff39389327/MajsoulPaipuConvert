@@ -1,9 +1,16 @@
 {
-  "crawler_mode": "date_room_player",
-  "start_date": "2024-01-01",
-  "end_date": "2025-11-13",
-  "target_room": "Jade",
-  "output_filename": "date_room_list.txt",
+  "crawler_mode": "auto",
+  "output_filename": "tonpuulist.txt",
   "headless_mode": true,
-  "fast_mode": false
+  "fast_mode": false,
+  "paipu_limit": 1,
+  "time_periods": [
+    "1w"
+  ],
+  "ranks": [
+    "Gold",
+    "Jade"
+  ],
+  "max_players_per_period": 1,
+  "save_screenshots": false
 }
