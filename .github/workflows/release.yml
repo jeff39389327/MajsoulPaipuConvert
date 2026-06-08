@@ -90,6 +90,13 @@ jobs:
         env:
           PYTHON: python
 
+      # electron-updater 以 latest.yml 的 version 欄位（非 tag）比對是否有新版，故每次建置都要
+      # 遞增版本，否則已安裝的使用者永遠偵測不到更新。用單調遞增的 run_number 當 patch 版號。
+      - name: Bump GUI version for auto-update
+        shell: pwsh
+        working-directory: gui
+        run: npm version "0.1.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+
       - name: Install GUI deps & build (freeze backend + electron-builder)
         shell: pwsh
         working-directory: gui
@@ -107,12 +114,18 @@ jobs:
           $exe = Get-ChildItem dist_gui -Recurse -Filter *.exe | Select-Object -First 1
           if ($null -eq $exe) { Write-Error "dist_gui 內找不到輸出的 .exe"; exit 1 }
           Write-Host "built: $($exe.FullName)"
+          # auto-update 元資料：electron-builder 產生的 latest.yml 必須隨安裝檔一起發佈，
+          # electron-updater 才能抓到 {releaseUrl}/latest.yml 比對版本。
+          if (-not (Test-Path dist_gui/latest.yml)) { Write-Error "dist_gui 內找不到 latest.yml（auto-update 必需）"; exit 1 }
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: MajsoulPaipuGUI-windows
-          path: dist_gui/*.exe
+          path: |
+            dist_gui/*.exe
+            dist_gui/latest.yml
+            dist_gui/*.blockmap
           if-no-files-found: error
 
       # rolling 'latest' 預發佈版：先刪掉舊的 release 與 tag，下一步才會在「目前的 commit」重建。
@@ -139,6 +152,10 @@ jobs:
           body: |
             自 `main` 自動建置的最新 Windows 安裝檔。
             Commit: ${{ github.sha }}
-          files: dist_gui/*.exe
+            Version: 0.1.${{ github.run_number }}
+          files: |
+            dist_gui/*.exe
+            dist_gui/latest.yml
+            dist_gui/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

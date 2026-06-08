@@ -7,6 +7,7 @@ const path = require('path');
 
 const pyRunner = require('./pyRunner');
 const configStore = require('./config');
+const updater = require('./updater');
 const { REPO_ROOT, resolveBackend, isPackaged } = require('./pythonLocator');
 
 let mainWindow = null;
@@ -122,10 +123,15 @@ function registerIpc() {
       settings,
       paths: derivePaths(),
       packaged: isPackaged(),
+      appVersion: app.getVersion(),
       systemLocale: app.getLocale(),
       backendAvailable: !!resolveBackend({ pythonPath: settings.pythonPath }),
     };
   });
+
+  // GUI 自動更新：手動「檢查更新」與「立即重啟安裝」。
+  ipcMain.handle('update:check', () => updater.checkForUpdates());
+  ipcMain.handle('update:quitAndInstall', () => updater.quitAndInstall());
 
   ipcMain.handle('app:setSettings', (_e, patch) => {
     settings = Object.assign({}, settings, patch || {});
@@ -211,6 +217,8 @@ app.whenReady().then(() => {
   settings = loadSettings();
   registerIpc();
   createWindow();
+  // 打包版啟動後檢查更新；事件透過 send('app:update', …) 轉發給 renderer。dev 模式為 no-op。
+  updater.init(app, send);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

@@ -139,3 +139,16 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
   background: var(--ok); color: #06301f; padding: 8px 16px; border-radius: 8px; font-weight: 600;
 }
+
+/* GUI 自動更新橫幅（固定於頂端） */
+#update-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; font-size: 13px;
+  background: var(--accent-2); color: #fff;
+  border-bottom: 1px solid var(--border);
+}
+#update-banner .spacer { flex: 1; }
+#update-banner button { padding: 4px 12px; }
+#update-banner button.primary { background: #fff; color: var(--accent-2); border-color: #fff; }
+#update-banner button.ghost { color: #fff; border-color: rgba(255,255,255,.6); }

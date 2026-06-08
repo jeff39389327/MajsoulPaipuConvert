@@ -26,6 +26,15 @@ contextBridge.exposeInMainWorld('api', {
   startJob: (kind, params) => ipcRenderer.invoke('job:start', { kind, params }),
   cancelJob: () => ipcRenderer.invoke('job:cancel'),
 
+  // GUI 自動更新
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  quitAndInstall: () => ipcRenderer.invoke('update:quitAndInstall'),
+  onUpdate: (cb) => {
+    const fn = (_e, payload) => cb(payload);
+    ipcRenderer.on('app:update', fn);
+    return () => ipcRenderer.removeListener('app:update', fn);
+  },
+
   // 事件訂閱 (回傳取消訂閱函式)
   onEvent: (cb) => {
     const fn = (_e, payload) => cb(payload);

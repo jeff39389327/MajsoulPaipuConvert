@@ -19,6 +19,7 @@
   "btn.runDoctor": "環境を再確認",
   "btn.toDownload": "ダウンロードと変換へ",
   "btn.openFolder": "フォルダを開く",
+  "btn.checkUpdate": "アップデートを確認",
 
   "status.idle": "待機中",
   "status.running": "実行中…",
@@ -30,6 +31,9 @@
   "settings.section.timing": "ダウンロード・変換オプション",
   "settings.section.runtime": "パフォーマンスと実行環境",
   "settings.section.lang": "言語",
+  "settings.section.about": "アプリ情報と更新",
+  "settings.version.label": "現在のバージョン",
+  "settings.version.hint": "GUI は起動時に更新を確認します。新しいバージョンはバックグラウンドでダウンロードし、再起動を促します。ここから手動確認も可能です",
   "settings.ms_username.label": "アカウント",
   "settings.ms_username.hint": "雀魂中国サーバーのメールまたはユーザー名",
   "settings.ms_password.label": "パスワード",
@@ -128,6 +132,13 @@
   "log.title": "生出力（デバッグ）",
   "log.show": "生出力を表示",
   "log.hide": "生出力を隠す",
+
+  "update.available": "新しいバージョン {version} を検出。バックグラウンドでダウンロード中…",
+  "update.downloading": "アップデートをダウンロード中… {percent}%",
+  "update.downloaded": "バージョン {version} のダウンロードが完了しました",
+  "update.restart": "今すぐ再起動して更新",
+  "update.later": "後で",
+  "update.checking": "更新を確認しています…",
 
   "error.LOGIN_FAILED": "雀魂のログインに失敗。認証情報を確認してください（error 151 はリソースバージョン更新が必要）",
   "error.VERSION_UPDATE_FAILED": "リソースバージョンを自動更新しましたがログインに失敗しました（error 151）。設定で MS_RES_VERSION を手動入力してください",

@@ -19,6 +19,7 @@
   "btn.runDoctor": "Re-check environment",
   "btn.toDownload": "Go to download & convert",
   "btn.openFolder": "Open folder",
+  "btn.checkUpdate": "Check for updates",
 
   "status.idle": "Idle",
   "status.running": "Running…",
@@ -30,6 +31,9 @@
   "settings.section.timing": "Download & convert options",
   "settings.section.runtime": "Performance & runtime",
   "settings.section.lang": "Language",
+  "settings.section.about": "About & updates",
+  "settings.version.label": "Current version",
+  "settings.version.hint": "The GUI checks for updates on startup; new versions download in the background and prompt to restart. You can also check manually here",
   "settings.ms_username.label": "Account",
   "settings.ms_username.hint": "Email or username for the Mahjong Soul CN server",
   "settings.ms_password.label": "Password",
@@ -128,6 +132,13 @@
   "log.title": "Raw output (debug)",
   "log.show": "Show raw output",
   "log.hide": "Hide raw output",
+
+  "update.available": "Found new version {version}; downloading in the background…",
+  "update.downloading": "Downloading update… {percent}%",
+  "update.downloaded": "Version {version} downloaded",
+  "update.restart": "Restart and update now",
+  "update.later": "Later",
+  "update.checking": "Checking for updates…",
 
   "error.LOGIN_FAILED": "Mahjong Soul login failed; check credentials (or error 151 needs a new resource version)",
   "error.VERSION_UPDATE_FAILED": "Auto-updated the resource version but login still failed (error 151); set MS_RES_VERSION manually in Settings",

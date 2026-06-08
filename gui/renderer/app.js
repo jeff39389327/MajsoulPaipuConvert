@@ -16,6 +16,7 @@ const state = {
   settings: null,
   paths: null,
   packaged: false,
+  appVersion: '',
   systemLocale: 'en',
   backendAvailable: true,
   config: { env: {}, crawler: null },
@@ -104,6 +105,54 @@ function runJob(kind, params, onEvent) {
 
 function cancelJob() {
   window.api.cancelJob();
+}
+
+// ---- GUI 自動更新橫幅 ---------------------------------------------------
+// 固定於視窗頂端，狀態：發現新版/下載中/已就緒(可重啟)/錯誤。dev 模式不會收到事件。
+function ensureUpdateBanner() {
+  let el = document.getElementById('update-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'update-banner';
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function setupUpdater() {
+  if (!window.api.onUpdate) return;
+  const banner = ensureUpdateBanner();
+  const show = (html) => { banner.innerHTML = html; banner.hidden = false; };
+
+  window.api.onUpdate((ev) => {
+    if (!ev || !ev.state) return;
+    if (ev.state === 'available') {
+      show(`<span>${t('update.available', { version: ev.version || '' })}</span>`);
+    } else if (ev.state === 'progress') {
+      show(`<span>${t('update.downloading', { percent: ev.percent ?? 0 })}</span>`);
+    } else if (ev.state === 'downloaded') {
+      banner.innerHTML = '';
+      banner.append(
+        Object.assign(document.createElement('span'), {
+          textContent: t('update.downloaded', { version: ev.version || '' }),
+        })
+      );
+      const btn = document.createElement('button');
+      btn.className = 'primary';
+      btn.textContent = t('update.restart');
+      btn.onclick = () => window.api.quitAndInstall();
+      const dismiss = document.createElement('button');
+      dismiss.className = 'ghost';
+      dismiss.textContent = t('update.later');
+      dismiss.onclick = () => { banner.hidden = true; };
+      banner.append(btn, dismiss);
+      banner.hidden = false;
+    } else {
+      // checking / none / error：不打擾使用者，靜默（錯誤已寫入 stderr log）。
+      banner.hidden = true;
+    }
+  });
 }
 
 function toast(msg) {
@@ -207,6 +256,7 @@ async function bootstrap() {
   state.settings = st.settings;
   state.paths = st.paths;
   state.packaged = st.packaged;
+  state.appVersion = st.appVersion || '';
   state.systemLocale = st.systemLocale;
   state.backendAvailable = st.backendAvailable;
 
@@ -239,6 +289,9 @@ async function bootstrap() {
   applyStaticI18n();
   renderEnvBadge();
   navigate('mode');
+
+  // GUI 自動更新（打包版才會收到事件）
+  setupUpdater();
 
   // 背景跑環境檢查
   runDoctor();

@@ -95,6 +95,17 @@ export function renderSettings(ctx, container) {
   container.append(field(t('settings.locale.label'),
     select(localeOptions, form.locale, (v) => { form.locale = v; ctx.setLocale(v); })));
 
+  // --- 關於與更新 ---
+  container.append(h('div', { class: 'section-title' }, t('settings.section.about')));
+  const verText = state.appVersion ? 'v' + state.appVersion : '—';
+  const checkBtn = h('button', { class: 'ghost', onclick: () => {
+    ctx.toast(t('update.checking'));
+    ctx.api.checkUpdate();
+  } }, t('btn.checkUpdate'));
+  container.append(field(t('settings.version.label'),
+    h('div', { class: 'inline-input' }, h('span', { class: 'path' }, verText), checkBtn),
+    t('settings.version.hint')));
+
   // --- 環境檢查 ---
   container.append(h('div', { class: 'section-title' }, t('env.title')));
   container.append(renderDoctorPanel(ctx));

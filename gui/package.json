@@ -7,11 +7,14 @@
     "start": "electron .",
     "test": "node test/smoke.js",
     "freeze": "python build/freeze_backend.py",
-    "dist": "npm run freeze && electron-builder --win",
+    "dist": "npm run freeze && electron-builder --win --publish never",
     "dist:dir": "electron-builder --win --dir"
   },
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
@@ -46,6 +49,13 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://github.com/jeff39389327/MajsoulPaipuConvert/releases/download/latest",
+        "channel": "latest"
+      }
+    ]
   }
 }

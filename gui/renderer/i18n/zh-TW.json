@@ -19,6 +19,7 @@
   "btn.runDoctor": "重新檢查環境",
   "btn.toDownload": "進入下載與轉換",
   "btn.openFolder": "開啟資料夾",
+  "btn.checkUpdate": "檢查更新",
 
   "status.idle": "閒置",
   "status.running": "執行中…",
@@ -30,6 +31,9 @@
   "settings.section.timing": "下載與轉換選項",
   "settings.section.runtime": "效能與執行環境",
   "settings.section.lang": "語言",
+  "settings.section.about": "關於與更新",
+  "settings.version.label": "目前版本",
+  "settings.version.hint": "GUI 啟動時會自動檢查更新；發現新版會在背景下載並提示重啟。可在此手動檢查",
   "settings.ms_username.label": "帳號",
   "settings.ms_username.hint": "雀魂中國伺服器的電子郵件或帳號",
   "settings.ms_password.label": "密碼",
@@ -128,6 +132,13 @@
   "log.title": "原始輸出（除錯）",
   "log.show": "顯示原始輸出",
   "log.hide": "隱藏原始輸出",
+
+  "update.available": "發現新版 {version}，正在背景下載…",
+  "update.downloading": "下載更新中… {percent}%",
+  "update.downloaded": "新版 {version} 已下載完成",
+  "update.restart": "立即重啟並更新",
+  "update.later": "稍後",
+  "update.checking": "正在檢查更新…",
 
   "error.LOGIN_FAILED": "雀魂登入失敗，請確認帳號密碼（或 error 151 需更新資源版本）",
   "error.VERSION_UPDATE_FAILED": "已自動更新資源版本但仍登入失敗（error 151），請至設定手動填入 MS_RES_VERSION",
