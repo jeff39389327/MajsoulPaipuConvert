@@ -34,7 +34,7 @@ import ms.protocol_pb2 as pb  # 來自 ms-api，與 tensoul 套件無關
 # 只有 resource version 會被 151 檢查，故僅此一項開放覆寫；其餘為 CN 固定值
 # (專案 CLAUDE.md 已限定 CN-only)。MS_RES_VERSION 於登入時才讀取，使 config.env
 # 的覆寫生效 (模組 import 早於 dotenv.load_dotenv)。
-_DEFAULT_RES_VERSION = "0.16.230"
+_DEFAULT_RES_VERSION = "0.16.232"
 _PKG_VERSION = "4.0.44"          # 伺服器不檢查，僅為與真實客戶端一致
 _LOGIN_TAG = "cn"                # CN-only
 _CONNECT_REGION = 1              # CN-only (config.json gateways 第 1 區)
@@ -165,6 +165,42 @@ def fetch_latest_res_version(timeout: float = 10.0) -> str | None:
             ver = ver[: -len(suffix)]
             break
     return ver or None
+
+
+def _parse_ver(v: str) -> list[int] | None:
+    try:
+        return [int(p) for p in v.strip().split(".")]
+    except (ValueError, AttributeError):
+        return None
+
+
+def res_version_candidates(current: str | None = None, span: int = 10) -> list[str]:
+    """產生 error 151 復原時要嘗試的資源版本候選（去重、依優先序）。
+
+    雀魂改版通常只升 patch（如 0.16.230 → 0.16.232），故優先以目前版本的 patch
+    +1..+span 探測，能在未更新很久後自癒；其後接 version.json 抓到的版本（CN web 多半
+    仍回舊 Laya 版會被自然濾掉），最後墊上內建預設值。
+
+    注意：fetch_latest_res_version 取自舊 Laya /1/version.json，回的版本（0.11.x）比現行
+    Unity WebGL 資源版本（0.16.x）舊，單靠它無法復原——patch 遞增探測才是主要手段。"""
+    current = current or _res_version()
+    out: list[str] = []
+    base = _parse_ver(current)
+    if base and len(base) >= 3:
+        for inc in range(1, span + 1):
+            out.append(".".join(str(n) for n in (base[:2] + [base[2] + inc] + base[3:])))
+    fetched = fetch_latest_res_version()
+    if fetched:
+        out.append(fetched)
+    out.append(_DEFAULT_RES_VERSION)
+
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for v in out:
+        if v and v not in seen:
+            seen.add(v)
+            uniq.append(v)
+    return uniq
 
 
 def is_resource_version_error(exc: BaseException) -> bool:

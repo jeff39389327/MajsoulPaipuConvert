@@ -30,6 +30,27 @@ export function renderSettings(ctx, container) {
     textInput(form.ms_username, (v) => (form.ms_username = v)), t('settings.ms_username.hint')));
   container.append(field(t('settings.ms_password.label'),
     textInput(form.ms_password, (v) => (form.ms_password = v), { type: 'password' }), t('settings.ms_password.hint')));
+
+  // 備用帳號池：下載失敗時依序切換（config.ini [account] account_pool，JSON 陣列）。
+  let pool = [];
+  try { pool = JSON.parse(env.ACCOUNT_POOL || '[]'); } catch (_) { pool = []; }
+  if (!Array.isArray(pool)) pool = [];
+  pool = pool.map((a) => ({ username: (a && a.username) || '', password: (a && a.password) || '' }));
+  const poolWrap = h('div');
+  const renderPool = () => {
+    poolWrap.innerHTML = '';
+    pool.forEach((acct, i) => {
+      poolWrap.append(h('div', { class: 'inline-input', style: 'margin-bottom:6px' },
+        textInput(acct.username, (v) => (acct.username = v), { placeholder: t('settings.pool.username') }),
+        textInput(acct.password, (v) => (acct.password = v), { type: 'password', placeholder: t('settings.pool.password') }),
+        h('button', { class: 'ghost', onclick: () => { pool.splice(i, 1); renderPool(); } }, t('settings.pool.remove'))));
+    });
+    poolWrap.append(h('button', { class: 'ghost', onclick: () => { pool.push({ username: '', password: '' }); renderPool(); } },
+      t('settings.pool.add')));
+  };
+  renderPool();
+  container.append(field(t('settings.pool.label'), poolWrap, t('settings.pool.hint')));
+
   container.append(field(t('settings.res_version.label'),
     textInput(form.MS_RES_VERSION, (v) => (form.MS_RES_VERSION = v)), t('settings.res_version.hint')));
 
@@ -119,10 +140,14 @@ export function renderSettings(ctx, container) {
 
   // --- 動作 ---
   const save = h('button', { class: 'primary', onclick: async () => {
+    const cleanPool = pool
+      .map((a) => ({ username: a.username.trim(), password: a.password.trim() }))
+      .filter((a) => a.username && a.password);
     await ctx.api.writeEnv({
       ms_username: form.ms_username,
       ms_password: form.ms_password,
       MS_RES_VERSION: form.MS_RES_VERSION,
+      ACCOUNT_POOL: cleanPool.length ? JSON.stringify(cleanPool) : '',
       COLLECT_TIMING: form.COLLECT_TIMING ? 'true' : 'false',
       SAVE_DEBUG: form.SAVE_DEBUG ? 'true' : 'false',
       SAVE_RAW_JSON: form.SAVE_RAW_JSON ? 'true' : 'false',

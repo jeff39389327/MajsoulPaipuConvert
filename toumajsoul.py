@@ -273,38 +273,42 @@ async def fetch_raw_timing_data(record_uuid, downloader):
         return None, None
 
 async def download_single_log(record_uuid, downloader, collect_timing=False):
-    """使用 tensoul-py-ng 下載單個牌譜"""
+    """使用 tensoul-py-ng 下載單個牌譜。
+
+    回傳 (log_data, timing_data, full_record, error_msg)；成功時 error_msg 為 None，
+    失敗時 log_data 為 None 且 error_msg 帶原因（供重試/斷點記錄判斷）。"""
     try:
         # tensoul 直接使用 record_uuid 下載並返回 tenhou.net/6 格式
         # lobby_id 設為 0（默認值）
         result = await downloader.download(record_uuid, lobby_id=0)
-        
+
         if result.get("is_error", False):
-            print(f"下載牌譜 {record_uuid} 失敗: {result.get('error_msg', 'Unknown error')}")
-            return None, None, None
-        
+            err = result.get("error_msg", "Unknown error")
+            print(f"下載牌譜 {record_uuid} 失敗: {err}")
+            return None, None, None, err
+
         log_data = result.get("log")
-        
+
         # 如果需要收集思考時間，獲取原始數據
         timing_data = None
         full_record = None
         if collect_timing:
             timing_data, full_record = await fetch_raw_timing_data(record_uuid, downloader)
-        
-        return log_data, timing_data, full_record
-        
+
+        return log_data, timing_data, full_record, None
+
     except Exception as e:
         print(f"下載牌譜 {record_uuid} 失敗: {str(e)}")
-        return None, None, None
+        return None, None, None, str(e)
 
 async def main():
     # 載入設定：優先 config.ini（單一設定檔），缺檔時回退舊的 config.env。
     import config_store
+    import download_recovery
     config_store.load_into_env()
 
     username = os.getenv("ms_username", "cohipi3374@nausard.com")
     password = os.getenv("ms_password", "48764876")
-    batch_size = 1
     base_dir = "mahjong_logs"
     temp_dir = "temp_logs"
     temp_file = "temp_ids.txt"
@@ -333,59 +337,86 @@ async def main():
     print(f"Debug模式: {'啟用' if save_debug else '停用'}")
     print(f"保存原始JSON: {'啟用' if save_raw_json else '停用'}")
 
-    # 讀取牌譜 ID
+    # 讀取牌譜 ID（保序去除清單內重複）
     with open('tonpuulist.txt', 'r', encoding='UTF-8') as f:
-        ids = [line.strip() for line in f]
-    
+        ids = list(dict.fromkeys(line.strip() for line in f if line.strip()))
+
     # 檢查已存在的檔案
     tenhou_existing = set()
     tenhou_dir = os.path.join(base_dir, "tenhou")
     if os.path.exists(tenhou_dir):
-        tenhou_existing = set(os.path.splitext(filename)[0] 
-                            for filename in os.listdir(tenhou_dir) 
+        tenhou_existing = set(os.path.splitext(filename)[0]
+                            for filename in os.listdir(tenhou_dir)
                             if filename.endswith(".json"))
-    
+
     unique_ids = [id for id in ids if id not in tenhou_existing]
     total_unique_ids = len(unique_ids)
-    
+
     print(f"需要下載的id數量: {total_unique_ids}")
-    
+
     if total_unique_ids == 0:
         print("沒有新的牌譜需要下載")
         return
-        
+
     with open(temp_file, 'w', encoding='UTF-8') as f:
         f.write('\n'.join(unique_ids))
-    
-    # 下載和處理牌譜
-    with open(temp_file, 'r', encoding='UTF-8') as f:
-        temp_ids = [line.strip() for line in f]
-        
+
+    # 帳號池（主帳號＋config.ini [account] account_pool）與斷點檔
+    accounts = download_recovery.load_accounts({"username": username, "password": password})
+    if not accounts:
+        print("錯誤：尚未設定雀魂帳號（config.ini [account]）")
+        return
+    checkpoint = download_recovery.Checkpoint("download_checkpoint.json").load()
+    retrying = [u for u in unique_ids if u in checkpoint.failed]
+    if retrying:
+        print(f"偵測到上次失敗的 {len(retrying)} 筆，將自動重試")
+    ini_paths = [p for p in (config_store.default_path(),) if os.path.exists(p)]
+    max_attempts = 3 if len(accounts) > 1 else 2
+
     print("開始下載牌譜...")
-    downloaded_ids = []
-    
-    # 初始化 tensoul downloader 並登入
+    failed_count = 0
+    aborted = False
+    done_uuids = set()
+
+    # 初始化 tensoul downloader 並登入（失敗時自動更新版本/換帳號，見 download_recovery）
     async with MajsoulPaipuDownloader() as downloader:
-        print("登入雀魂...")
-        await ms_patch.login(downloader, username, password)   # 可攜式登入 (繞過 151)
-        ms_patch.patch_downloader(downloader)                  # 下載也用正確版本字串
+        session = download_recovery.AccountSession(
+            downloader, accounts, ini_paths=ini_paths,
+            notify=lambda code, msg="": print(f"[帳號] {code} {msg}".rstrip()))
+        print(f"登入雀魂...（號池共 {len(accounts)} 個帳號）")
+        try:
+            await session.ensure_login()
+        except download_recovery.AllAccountsFailed as e:
+            checkpoint.set_pending(unique_ids)
+            print(f"所有帳號皆無法登入（{e}），已記錄斷點於 {checkpoint.path}")
+            return
         print("登入成功！")
-        
+
+        async def dl(uuid):
+            return await download_single_log(uuid, downloader, collect_timing)
+
         with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
-            for i in range(0, total_unique_ids, batch_size):
-                batch_ids = temp_ids[i:i+batch_size]
-                
-                # 下載牌譜
-                download_tasks = [download_single_log(record_uuid, downloader, collect_timing) for record_uuid in batch_ids]
-                logs_batch = await asyncio.gather(*download_tasks)
-                
-                # 處理每個下載的牌譜
-                for (log, timing_data, full_record), record_uuid in zip(logs_batch, batch_ids):
-                    if log:
-                        await process_log(record_uuid, log, base_dir, timing_data, full_record, save_debug, save_raw_json)
-                        downloaded_ids.append(record_uuid)
-                        download_progress.update(1)
-    
+            for record_uuid in unique_ids:
+                try:
+                    log, timing_data, full_record, err = await download_recovery.download_with_retry(
+                        session, dl, record_uuid, max_attempts=max_attempts)
+                except download_recovery.AllAccountsFailed as e:
+                    aborted = True
+                    pending = [u for u in unique_ids if u not in done_uuids]
+                    checkpoint.set_pending(pending)
+                    print(f"\n所有帳號皆無法登入（{e}），中止。"
+                          f"尚餘 {len(pending)} 筆未處理，已記錄斷點於 {checkpoint.path}")
+                    break
+                done_uuids.add(record_uuid)
+                if log:
+                    checkpoint.clear_failure(record_uuid)
+                    await process_log(record_uuid, log, base_dir, timing_data, full_record, save_debug, save_raw_json)
+                    download_progress.update(1)
+                else:
+                    failed_count += 1
+                    checkpoint.record_failure(record_uuid, err or "unknown error",
+                                              session.current_username)
+
     # 清理臨時檔案
     print("\n清理臨時檔案...")
     os.remove(temp_file)
@@ -393,8 +424,16 @@ async def main():
         for file in os.listdir(temp_dir):
             os.remove(os.path.join(temp_dir, file))
         os.rmdir(temp_dir)
-    
-    print("全部處理完成！")
+
+    if aborted:
+        return
+    if failed_count:
+        checkpoint.set_pending([])
+        print(f"完成，但有 {failed_count} 筆失敗（已記錄於 {checkpoint.path}，重新執行會自動重試）")
+    else:
+        checkpoint.set_pending([])
+        checkpoint.delete_if_clean()
+        print("全部處理完成！")
 
 if __name__ == "__main__":
     asyncio.run(main())

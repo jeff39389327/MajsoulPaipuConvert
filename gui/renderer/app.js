@@ -23,6 +23,7 @@ const state = {
   config: { env: {}, crawler: null },
   doctor: null,
   crawlOutputFile: null, // Stage 1 完成後的輸出檔，供 Stage 2 自動接手
+  downloadInputList: null, // 下載頁的 ID 清單（txt）路徑；爬取完成會自動帶入，也可手動指定
   autoStartDownload: false, // 由 crawl 自動串接時設 true，download view 進場即自動開始
   activeStep: 'mode',
   jobStatus: 'idle', // idle | running | done | error
@@ -121,6 +122,16 @@ function ensureUpdateBanner() {
   return el;
 }
 
+// 位元組數人類可讀化（自動換 B/KB/MB/GB），給更新進度的速度與下載量用。
+function humanBytes(n) {
+  const v = Number(n) || 0;
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let x = v;
+  while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
+  return `${i === 0 ? x : x.toFixed(1)} ${units[i]}`;
+}
+
 function setupUpdater() {
   if (!window.api.onUpdate) return;
   const banner = ensureUpdateBanner();
@@ -131,7 +142,12 @@ function setupUpdater() {
     if (ev.state === 'available') {
       show(`<span>${t('update.available', { version: ev.version || '' })}</span>`);
     } else if (ev.state === 'progress') {
-      show(`<span>${t('update.downloading', { percent: ev.percent ?? 0 })}</span>`);
+      show(`<span>${t('update.downloading', {
+        percent: ev.percent ?? 0,
+        speed: `${humanBytes(ev.bytesPerSecond)}/s`,
+        transferred: humanBytes(ev.transferred),
+        total: humanBytes(ev.total),
+      })}</span>`);
     } else if (ev.state === 'downloaded') {
       banner.innerHTML = '';
       banner.append(
@@ -239,7 +255,9 @@ function applyStaticI18n() {
   document.querySelectorAll('[data-i18n]').forEach((el) => {
     el.textContent = t(el.getAttribute('data-i18n'));
   });
-  document.getElementById('log-toggle').textContent = t('log.show');
+  const drawerEl = document.getElementById('log-drawer');
+  document.getElementById('log-toggle').textContent = drawerEl && !drawerEl.hidden ? t('log.hide') : t('log.show');
+  document.getElementById('log-clear').textContent = t('log.clear');
   document.getElementById('cancel-btn').textContent = t('btn.cancel');
   setStatus(state.jobStatus);
 }
@@ -277,6 +295,11 @@ async function bootstrap() {
   toggle.onclick = () => {
     drawer.hidden = !drawer.hidden;
     toggle.textContent = drawer.hidden ? t('log.show') : t('log.hide');
+  };
+  // 清除日誌：緩衝與畫面一起清（appendLog 以 logBuffer 為準，只清 DOM 會被下一幀蓋回來）。
+  document.getElementById('log-clear').onclick = () => {
+    logBuffer = '';
+    drawer.textContent = '';
   };
   document.getElementById('cancel-btn').onclick = cancelJob;
 

@@ -13,6 +13,13 @@
 - 轉換並發：mjai-reviewer 是外部 binary，可安全多開 -> Semaphore(convert_concurrency)
   (預設 = CPU 核心，上限 8)。吞吐主要來自這裡。
 
+失敗復原 (download_recovery，repo root 共用模組)
+------------------------------------------------
+- 下載失敗先以同帳號重連＋重登（涵蓋 error 151 資源版本換代），仍失敗依序切換
+  [account] account_pool 中的備用帳號；全部帳號不可用才中止。
+- 斷點：work_dir/download_checkpoint.json 記錄失敗項與中止時未處理清單；
+  下次執行自動重試，全部成功即自動刪除。
+
 帳密來源：不經 argv，改由單一 config.ini 讀取 (路徑由 params.config_ini_path 帶入，GUI 全面
 管理該檔；缺檔回退舊 config.env)；params 僅帶非敏感的並發/旗標設定。
 """
@@ -24,14 +31,14 @@ import os
 from . import bridge, paths
 
 
-def _read_id_list(params: dict, work_dir: str) -> list[str]:
-    """取得待下載 ID 清單：優先用 params['input_list'] (Stage 1 自動銜接)，
-    否則回退 work_dir/tonpuulist.txt。"""
+def _read_id_list(params: dict, work_dir: str) -> tuple[list[str], str]:
+    """取得待下載 ID 清單：優先用 params['input_list'] (Stage 1 自動銜接或 GUI 指定)，
+    否則回退 work_dir/tonpuulist.txt。保序去除清單內重複；回傳 (ids, 實際路徑)。"""
     path = params.get("input_list") or os.path.join(work_dir, "tonpuulist.txt")
     if not os.path.exists(path):
-        return []
+        return [], path
     with open(path, "r", encoding="utf-8") as f:
-        return [ln.strip() for ln in f if ln.strip()]
+        return list(dict.fromkeys(ln.strip() for ln in f if ln.strip())), path
 
 
 def _filter_existing(ids: list[str], base_dir: str) -> list[str]:
@@ -51,73 +58,6 @@ def _bool_env(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() == "true"
 
 
-def _persist_res_version(ini_paths: list[str], version: str) -> None:
-    """把成功登入的資源版本寫回 config.ini 的 [account] ms_res_version，下次直接可用、毋需再抓。
-
-    ini_paths 通常為 [primary(執行檔同層), mirror(userData)]：兩者都寫，確保升級洗掉同層檔後
-    仍能由 mirror 還原到最新版本。寫入失敗不影響本次執行（記憶體中已套用新版本）。"""
-    import config_store
-
-    for path in ini_paths:
-        if not path:
-            continue
-        try:
-            config_store.set_value(path, "account", "ms_res_version", version)
-        except Exception:  # noqa: BLE001 持久化失敗不影響本次執行
-            pass
-
-
-async def _login_with_auto_update(downloader, username: str, password: str, ini_paths: list[str]) -> bool:
-    """登入雀魂；遇 error 151 (資源版本過期) 時自動抓最新版本、寫回 config.env 並重新登入。
-
-    候選順序：version.json 抓到的最新版本 -> ms_patch 內建預設值 (修正 GUI 寫入空值的情況)。
-    任一候選成功即持久化並回 True；全部失敗回 False (已 emit 對應錯誤事件)。"""
-    import ms_patch
-
-    try:
-        await ms_patch.login(downloader, username, password)
-        ms_patch.patch_downloader(downloader)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        if not ms_patch.is_resource_version_error(exc):
-            bridge.error("download", "LOGIN_FAILED", str(exc), fatal=True)
-            return False
-
-    # error 151：自動更新資源版本並重新登入 (重開)。
-    bridge.notice("download", "VERSION_AUTO_UPDATING")
-
-    # 以「第一次登入實際使用的版本」(空值會被 _res_version 解析為預設) 作為已試集合，
-    # 避免重複重試同一個剛失敗的版本。
-    tried = {ms_patch._res_version()}
-    candidates: list[str] = []
-    fetched = ms_patch.fetch_latest_res_version()
-    if fetched:
-        candidates.append(fetched)
-    candidates.append(ms_patch._DEFAULT_RES_VERSION)
-
-    for ver in candidates:
-        if not ver or ver in tried:
-            continue
-        tried.add(ver)
-        # _res_version() 於登入時才讀環境變數，故直接改 os.environ 即可即時生效。
-        os.environ["MS_RES_VERSION"] = ver
-        try:
-            await ms_patch.login(downloader, username, password)
-            ms_patch.patch_downloader(downloader)
-        except Exception as exc:  # noqa: BLE001
-            if ms_patch.is_resource_version_error(exc):
-                continue  # 此版本仍被拒，試下一個候選
-            bridge.error("download", "LOGIN_FAILED", str(exc), fatal=True)
-            return False
-        _persist_res_version(ini_paths, ver)
-        bridge.notice("download", "VERSION_UPDATED", ver)
-        return True
-
-    bridge.error("download", "VERSION_UPDATE_FAILED",
-                 "已嘗試自動更新資源版本但仍登入失敗 (error 151)", fatal=True)
-    return False
-
-
 async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     import config_store
 
@@ -134,6 +74,7 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     try:
         import ms_patch
         import toumajsoul
+        import download_recovery
         from toumajsoul import download_single_log, process_log
         MajsoulPaipuDownloader = toumajsoul.MajsoulPaipuDownloader
         ms_patch.ensure_ms_cfg()
@@ -161,40 +102,93 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     os.makedirs(os.path.join(base_dir, "tenhou"), exist_ok=True)
     os.makedirs("temp_logs", exist_ok=True)
 
-    ids = _read_id_list(params, work_dir)
+    # 帳號池：主帳號＋[account] account_pool 備用帳號（失敗時輪替）。
+    accounts = download_recovery.load_accounts(
+        {"username": username, "password": password})
+    if not accounts:
+        bridge.error("download", "NO_ACCOUNT", "config.ini [account] 未設定帳密", fatal=True)
+        bridge.done(ok=False, exit_code=1)
+        return
+
+    ids, input_path = _read_id_list(params, work_dir)
+    if not ids:
+        bridge.error("download", "NO_INPUT_LIST", input_path, fatal=True)
+        bridge.done(ok=False, exit_code=1)
+        return
     unique_ids = _filter_existing(ids, base_dir)
     total = len(unique_ids)
 
+    # 斷點檔：記錄失敗項與中止時的未處理清單；上次失敗項此次自動重試。
+    checkpoint = download_recovery.Checkpoint(
+        os.path.join(work_dir, "download_checkpoint.json")).load()
+    retrying = [u for u in unique_ids if u in checkpoint.failed]
+
     bridge.stage_start("download", total=total, collect_timing=collect_timing,
                        download_concurrency=download_concurrency,
-                       convert_concurrency=convert_concurrency)
+                       convert_concurrency=convert_concurrency,
+                       accounts=len(accounts), input_list=input_path)
+    if retrying:
+        bridge.notice("download", "RETRY_PREV_FAILED", str(len(retrying)))
 
     if total == 0:
-        bridge.stage_done("download", downloaded=0, total=0)
+        bridge.stage_done("download", downloaded=0, total=0,
+                          output_dir=os.path.abspath(base_dir))
         bridge.done(ok=True)
         return
 
     dl_sem = asyncio.Semaphore(download_concurrency)
     mj_sem = asyncio.Semaphore(convert_concurrency)
-    counters = {"dl": 0, "cv": 0}
+    counters = {"dl": 0, "cv": 0, "fail": 0}
+    done_uuids: set = set()
+    failures: list[dict] = []
+    state = {"aborted": False}
+    max_attempts = 3 if len(accounts) > 1 else 2
 
     async with MajsoulPaipuDownloader() as downloader:
-        if not await _login_with_auto_update(downloader, username, password, ini_paths):
+        session = download_recovery.AccountSession(
+            downloader, accounts, ini_paths=ini_paths,
+            notify=lambda code, msg="": bridge.notice("download", code, msg))
+        try:
+            await session.ensure_login()
+        except download_recovery.AllAccountsFailed as exc:
+            checkpoint.set_pending(unique_ids)
+            bridge.error("download",
+                         "LOGIN_FAILED" if len(accounts) == 1 else "ALL_ACCOUNTS_FAILED",
+                         str(exc), fatal=True)
             bridge.done(ok=False, exit_code=1)
             return
 
-        async def worker(uuid: str) -> None:
+        async def download_fn(uuid: str):
             async with dl_sem:
-                log, timing, full = await download_single_log(uuid, downloader, collect_timing)
+                return await download_single_log(uuid, downloader, collect_timing)
+
+        async def worker(uuid: str) -> None:
+            if state["aborted"]:
+                return
+            try:
+                log, timing, full, err = await download_recovery.download_with_retry(
+                    session, download_fn, uuid, max_attempts=max_attempts)
+            except download_recovery.AllAccountsFailed:
+                state["aborted"] = True
+                return
+            done_uuids.add(uuid)
             counters["dl"] += 1
+            if not log:
+                counters["fail"] += 1
+                failures.append({"uuid": uuid, "error": err or "unknown error"})
+                checkpoint.record_failure(uuid, err or "unknown error",
+                                          session.current_username)
+                bridge.progress("download", phase="download", done=counters["dl"],
+                                total=total, uuid=uuid, ok=False, failed=counters["fail"])
+                return
+            checkpoint.clear_failure(uuid)
             bridge.progress("download", phase="download", done=counters["dl"], total=total,
-                            uuid=uuid, ok=bool(log))
-            if log:
-                await process_log(uuid, log, base_dir, timing, full,
-                                  save_debug, save_raw_json, mjai_semaphore=mj_sem)
-                counters["cv"] += 1
-                bridge.progress("convert", phase="mjai", done=counters["cv"], total=total,
-                                uuid=uuid, ok=True)
+                            uuid=uuid, ok=True, failed=counters["fail"])
+            await process_log(uuid, log, base_dir, timing, full,
+                              save_debug, save_raw_json, mjai_semaphore=mj_sem)
+            counters["cv"] += 1
+            bridge.progress("convert", phase="mjai", done=counters["cv"], total=total,
+                            uuid=uuid, ok=True)
 
         await asyncio.gather(*(worker(u) for u in unique_ids))
 
@@ -205,7 +199,21 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     except Exception:  # noqa: BLE001
         pass
 
+    if state["aborted"]:
+        # 號池全滅：記錄斷點（剩餘未處理清單），下次執行自動續跑。
+        pending = [u for u in unique_ids if u not in done_uuids]
+        checkpoint.set_pending(pending)
+        bridge.error("download", "ALL_ACCOUNTS_FAILED",
+                     f"尚餘 {len(pending)} 筆未處理，斷點：{checkpoint.path}", fatal=True)
+        bridge.done(ok=False, exit_code=1)
+        return
+
+    checkpoint.set_pending([])
+    checkpoint.delete_if_clean()
     bridge.stage_done("download", downloaded=counters["cv"], total=total,
+                      failed=counters["fail"],
+                      failed_uuids=[f["uuid"] for f in failures[:20]],
+                      checkpoint_path=os.path.abspath(checkpoint.path) if counters["fail"] else "",
                       output_dir=os.path.abspath(base_dir))
     bridge.done(ok=True)
 

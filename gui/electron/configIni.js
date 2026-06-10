@@ -12,7 +12,7 @@ const path = require('path');
 
 // 區段與鍵的標準順序（序列化時據此排版；未列出的鍵會保留並追加於區段尾）。
 const SCHEMA = {
-  account: ['ms_username', 'ms_password', 'ms_res_version'],
+  account: ['ms_username', 'ms_password', 'ms_res_version', 'account_pool'],
   download: [
     'collect_timing', 'save_debug', 'save_raw_json',
     'download_concurrency', 'convert_concurrency', 'sequential_download',
@@ -27,7 +27,7 @@ const SCHEMA = {
 
 // 預設值（缺鍵時補上，確保檔案完整、後端 / 前端讀到的型別穩定）。
 const DEFAULTS = {
-  account: { ms_username: '', ms_password: '', ms_res_version: '' },
+  account: { ms_username: '', ms_password: '', ms_res_version: '', account_pool: '' },
   download: {
     collect_timing: 'true', save_debug: 'false', save_raw_json: 'true',
     download_concurrency: '3', convert_concurrency: '0', sequential_download: 'false',
@@ -42,7 +42,7 @@ const DEFAULTS = {
 };
 
 const SECTION_COMMENT = {
-  account: '# 雀魂帳號（中國伺服器）。ms_res_version 平常留空，error 151 時自動寫回。',
+  account: '# 雀魂帳號（中國伺服器）。ms_res_version 平常留空，error 151 時自動寫回。\n# account_pool 為備用帳號池（JSON 陣列 [{"username":"...","password":"..."}]），下載失敗時依序切換。',
   download: '# 下載 / 轉換選項與效能。布林用 true/false；convert_concurrency=0 表自動。',
   crawler: '# 爬取設定（最後一次使用的值）。多值（time_periods/ranks/manual_player_urls）逗號分隔。',
   app: '# GUI 偏好。work_dir 留空＝執行檔同層；locale 留空＝跟隨系統。',

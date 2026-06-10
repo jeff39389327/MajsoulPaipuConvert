@@ -18,6 +18,7 @@ const ENV_TO_INI = {
   ms_username: ['account', 'ms_username'],
   ms_password: ['account', 'ms_password'],
   MS_RES_VERSION: ['account', 'ms_res_version'],
+  ACCOUNT_POOL: ['account', 'account_pool'],
   COLLECT_TIMING: ['download', 'collect_timing'],
   SAVE_DEBUG: ['download', 'save_debug'],
   SAVE_RAW_JSON: ['download', 'save_raw_json'],

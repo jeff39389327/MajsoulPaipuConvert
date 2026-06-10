@@ -11,6 +11,10 @@ ms_username = your_email@example.com
 ms_password = your_password
 # 大改版後若登入回 error 151，GUI 會自動抓最新版本、重試並寫回此值；平常留空即可。
 ms_res_version =
+# 備用帳號池（JSON 陣列）。下載失敗時先以原帳號重登，仍失敗依序切換到這裡的帳號；
+# 全部不可用才中止並把進度記到 download_checkpoint.json（下次執行自動重試）。
+# 例：account_pool = [{"username":"a@b.com","password":"pw1"},{"username":"c@d.com","password":"pw2"}]
+account_pool =
 
 [download]
 # 思考時間：在 MJAI 中加入每手 think_ms（預設 true）。

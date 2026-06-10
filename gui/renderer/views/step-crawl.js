@@ -41,6 +41,8 @@ export function renderCrawl(ctx, container) {
       bar.classList.remove('indeterminate');
       bar.querySelector('span').style.width = '100%';
       state.crawlOutputFile = ev.stats.output_file;
+      // 爬取輸出永遠是最新清單：覆寫下載頁的 ID 清單路徑（避免殘留先前手動指定的舊檔）。
+      state.downloadInputList = ev.stats.output_file || state.downloadInputList;
       label.textContent = t('crawl.done', { count: ev.stats.collected ?? 0 });
       result.innerHTML = '';
       const out = ev.stats.output_file || '';

@@ -33,7 +33,13 @@ function init(app, send) {
     send('app:update', { state: 'available', version: info && info.version }));
   autoUpdater.on('update-not-available', () => send('app:update', { state: 'none' }));
   autoUpdater.on('download-progress', (p) =>
-    send('app:update', { state: 'progress', percent: Math.round((p && p.percent) || 0) }));
+    send('app:update', {
+      state: 'progress',
+      percent: Math.round((p && p.percent) || 0),
+      bytesPerSecond: (p && p.bytesPerSecond) || 0,
+      transferred: (p && p.transferred) || 0,
+      total: (p && p.total) || 0,
+    }));
   autoUpdater.on('update-downloaded', (info) =>
     send('app:update', { state: 'downloaded', version: info && info.version }));
   autoUpdater.on('error', (err) =>

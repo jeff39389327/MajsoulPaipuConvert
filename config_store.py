@@ -26,6 +26,8 @@ _ENV_MAP: dict[tuple[str, str], str] = {
     ("account", "ms_username"): "ms_username",
     ("account", "ms_password"): "ms_password",
     ("account", "ms_res_version"): "MS_RES_VERSION",
+    # 備用帳號池（JSON 陣列 [{"username","password"},...]），下載失敗時輪替（download_recovery）。
+    ("account", "account_pool"): "ACCOUNT_POOL",
     ("download", "collect_timing"): "COLLECT_TIMING",
     ("download", "save_debug"): "SAVE_DEBUG",
     ("download", "save_raw_json"): "SAVE_RAW_JSON",
@@ -43,7 +45,9 @@ def _read_ini(path: str) -> dict[str, dict[str, str]]:
     """以 configparser 解析 config.ini，回傳 {section: {key: value}}（鍵小寫）。檔案缺失回空。"""
     import configparser
 
-    parser = configparser.ConfigParser()
+    # interpolation=None：值原樣讀取。預設的 BasicInterpolation 會把值內的 '%' 當
+    # 插值語法（密碼或 account_pool JSON 含 '%' 即拋 InterpolationSyntaxError）。
+    parser = configparser.ConfigParser(interpolation=None)
     parser.optionxform = str.lower  # 鍵小寫（與 Node 端一致）
     try:
         with open(path, "r", encoding="utf-8") as f:

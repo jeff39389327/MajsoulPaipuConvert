@@ -120,11 +120,26 @@ timings will misalign.
 
 Behavior is driven by **`config.ini`** — the single unified settings file (sections `[account]`,
 `[download]`, `[crawler]`, `[app]`). `config_store.load_into_env()` loads `[account]`/`[download]`
-keys (`ms_username`, `ms_password`, `MS_RES_VERSION`, `COLLECT_TIMING`, `SAVE_DEBUG`, `SAVE_RAW_JSON`)
-into `os.environ`, so the existing `os.getenv`-based code (`toumajsoul.py`, `ms_patch.py`) is unchanged.
-Setting `SAVE_RAW_JSON` force-enables `COLLECT_TIMING`. If `config.ini` is absent, the loader falls back
-to the legacy `config.env` (python-dotenv) for backward compat. The GUI owns `config.ini`; on error 151,
-`run_download.py` writes the recovered `ms_res_version` back into it (see `config_store.set_value`).
+keys (`ms_username`, `ms_password`, `MS_RES_VERSION`, `ACCOUNT_POOL`, `COLLECT_TIMING`, `SAVE_DEBUG`,
+`SAVE_RAW_JSON`) into `os.environ`, so the existing `os.getenv`-based code (`toumajsoul.py`,
+`ms_patch.py`) is unchanged. Setting `SAVE_RAW_JSON` force-enables `COLLECT_TIMING`. If `config.ini`
+is absent, the loader falls back to the legacy `config.env` (python-dotenv) for backward compat.
+The GUI owns `config.ini`; on error 151, the recovered `ms_res_version` is written back into it
+(see `config_store.set_value`).
+
+**Failure recovery (`download_recovery.py`, shared by CLI and GUI backend).** Accounts come from
+`load_accounts()`: primary `[account]` credentials plus `account_pool` (a JSON array of
+`{"username","password"}`; reaches Python as env `ACCOUNT_POOL`). `AccountSession` wraps the single
+shared `MajsoulPaipuDownloader`: on a download failure, `download_with_retry` first reconnects and
+re-logs-in with the *same* account (which covers error 151 via the auto resource-version update),
+then on the next failure rotates to the next pool account; a `generation` counter + asyncio lock
+ensures concurrent workers trigger only one recovery. Only when *every* account fails to log in does
+it raise `AllAccountsFailed` — the run aborts and `Checkpoint` (`download_checkpoint.json` in the
+work dir) records the failed map (`uuid → {error, account, ts}`) and the still-pending list. Failed
+uuids are retried automatically on the next run (they're not in the tenhou dir, so the normal dedupe
+re-queues them); the checkpoint file is deleted when a run ends fully clean. `download_single_log`
+returns a 4-tuple `(log, timing, full_record, error_msg)` — keep its error contract intact, the
+retry logic keys off `log is None`.
 
 ## Gotchas
 
