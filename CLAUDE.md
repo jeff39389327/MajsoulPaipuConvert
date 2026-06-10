@@ -154,6 +154,13 @@ retry logic keys off `log is None`.
   it in (CLI: at the repo root; GUI: next to the executable, auto-created/migrated). The GUI mirrors it
   to `userData` and restores it on launch, so it survives electron-updater (NSIS) reinstalls that wipe
   the install dir. The legacy `config.env` / `config.env.example` still work as a fallback for CLI use.
+- **Never put output data in the install dir.** electron-updater's NSIS update wipes the install
+  directory, so the packaged GUI's default `work_dir` is `Documents\MajsoulPaipuGUI` (persistent +
+  findable), **not** the exe folder — otherwise `mahjong_logs/`, `tonpuulist.txt`,
+  `download_checkpoint.json` etc. get deleted on every update. `main.js` `defaultWorkDir()` picks
+  Documents (falls back to `userData/work`); `migrateLegacyWorkDirData()` moves any leftover data from
+  the old exe-folder default on first launch. Only `config.ini` lives next to the exe (it has the
+  mirror/restore safety net above).
 
 ## Legacy / non-pipeline files (don't assume these are part of the main flow)
 

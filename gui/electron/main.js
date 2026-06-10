@@ -120,16 +120,51 @@ function pickWritableDir(candidates) {
   return candidates[candidates.length - 1];
 }
 
-// 「自動」工作目錄：dev = repo root；凍結版 = 安裝執行檔同層（使用者要求輸出與執行檔同層、
-// 好找）。同層不可寫（如裝到 Program Files）才退到 文件夾 / userData。
+// 「自動」工作目錄：dev = repo root；凍結版 = 「文件\MajsoulPaipuGUI」。
+// 注意：**不可**用安裝執行檔同層（exeDir）——electron-updater(NSIS) 更新會清空安裝目錄，
+// 連同 mahjong_logs / tonpuulist.txt / download_checkpoint.json 等下載產出一併刪除。
+// 改用文件夾（持久、更新不影響、仍好找）；不可寫才退到 userData。
 function defaultWorkDir() {
   if (!isPackaged()) return REPO_ROOT;
-  const exeDir = path.dirname(app.getPath('exe'));
   return pickWritableDir([
-    exeDir,
     path.join(app.getPath('documents'), 'MajsoulPaipuGUI'),
     path.join(app.getPath('userData'), 'work'),
   ]);
+}
+
+// 舊版（≤ 此修復前）的自動工作目錄＝執行檔同層；用來把殘留資料搬到新位置。
+function legacyInstallWorkDir() {
+  if (!isPackaged()) return '';
+  try {
+    return path.dirname(app.getPath('exe'));
+  } catch (_) {
+    return '';
+  }
+}
+
+// 一次性把舊位置（執行檔同層）殘留的下載產出搬到新的工作目錄，避免使用者升級後「看不到」舊資料、
+// 或被下次更新清掉。僅在「使用預設工作目錄、舊位置確有資料、新位置尚無同名項」時搬移；rename 失敗
+// （如跨磁碟）則略過不致命（新預設已能保護未來資料）。
+function migrateLegacyWorkDirData() {
+  if (!isPackaged()) return;
+  if (settings && settings.workDir) return; // 使用者自訂過位置 → 不動
+  const from = legacyInstallWorkDir();
+  const to = resolveWorkDir();
+  if (!from || !to || path.resolve(from) === path.resolve(to)) return;
+
+  const ITEMS = ['mahjong_logs', 'tonpuulist.txt', 'date_room_list.txt',
+    'download_checkpoint.json', 'crawler_progress.json'];
+  for (const name of ITEMS) {
+    const src = path.join(from, name);
+    const dst = path.join(to, name);
+    try {
+      if (!fs.existsSync(src) || fs.existsSync(dst)) continue;
+      fs.mkdirSync(to, { recursive: true });
+      fs.renameSync(src, dst); // 同磁碟瞬間完成；跨磁碟會丟錯 → 由 catch 略過
+    } catch (_) {
+      /* 搬移失敗不致命：新位置已生效，使用者可手動搬舊檔 */
+    }
+  }
 }
 
 // 解析實際工作目錄。未自訂（空字串）或仍是舊版自動預設（REPO_ROOT；凍結版即 resources 夾，
@@ -295,6 +330,7 @@ app.whenReady().then(() => {
   configIni.restoreFromMirror(CONFIG.primary, CONFIG.mirror); // 同層檔被升級洗掉 → 由鏡像還原
   migrateLegacyIfNeeded();                                    // 首次啟動：遷入舊設定檔
   settings = loadSettings();
+  migrateLegacyWorkDirData();                                 // 把舊「執行檔同層」殘留產出搬到文件夾
   registerIpc();
   createWindow();
   // 打包版啟動後檢查更新；事件透過 send('app:update', …) 轉發給 renderer。dev 模式為 no-op。

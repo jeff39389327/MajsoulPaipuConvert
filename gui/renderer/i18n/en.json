@@ -65,7 +65,7 @@
   "settings.python_path.label": "Python path (dev mode)",
   "settings.python_path.hint": "Leave blank to auto-detect; packaged build has it bundled",
   "settings.work_dir.label": "Work / output folder",
-  "settings.work_dir.hint": "Folder for mahjong_logs output; packaged build defaults to the executable's folder — leave blank to use it",
+  "settings.work_dir.hint": "Folder for mahjong_logs output; packaged build defaults to Documents\\MajsoulPaipuGUI (logs are kept across updates) — leave blank to use it",
   "settings.locale.label": "Interface language",
   "settings.saved": "Settings saved",
 

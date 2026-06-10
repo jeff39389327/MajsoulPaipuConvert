@@ -65,7 +65,7 @@
   "settings.python_path.label": "Python 路徑（開發模式）",
   "settings.python_path.hint": "留空則自動偵測；打包版已內建，不需設定",
   "settings.work_dir.label": "工作／輸出資料夾",
-  "settings.work_dir.hint": "存放 mahjong_logs 輸出的資料夾；打包版預設為「執行檔同層」，留空即用預設",
+  "settings.work_dir.hint": "存放 mahjong_logs 輸出的資料夾；打包版預設為「文件\\MajsoulPaipuGUI」（更新不會刪除其中的牌譜），留空即用預設",
   "settings.locale.label": "介面語言",
   "settings.saved": "設定已儲存",
 
