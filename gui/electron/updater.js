@@ -26,6 +26,10 @@ function init(app, send) {
   autoUpdater.autoDownload = true;          // 偵測到新版即自動下載
   autoUpdater.autoInstallOnAppQuit = true;  // 使用者沒按「立即重啟」也會在下次離開時安裝
   autoUpdater.allowPrerelease = true;       // 通道為預發佈（rolling latest）
+  // 關閉差分下載（blockmap）：electron-updater 預設會先抓 .blockmap 做區塊 diff＋ranged 請求，
+  // 這段不回報 download-progress，且在 Windows/NSIS + GitHub CDN 上常卡死或極慢（症狀：橫幅
+  // 停在「正在背景下載…」卻無百分比）。關掉後直接整檔下載，行為與瀏覽器一致、穩定且會持續回報進度。
+  autoUpdater.disableDifferentialDownload = true;
   // electron-updater 內建 logger 介面相容 console；保留預設即可（log 進 stderr）。
 
   autoUpdater.on('checking-for-update', () => send('app:update', { state: 'checking' }));

@@ -157,6 +157,7 @@
   "update.restart": "今すぐ再起動して更新",
   "update.later": "後で",
   "update.checking": "更新を確認しています…",
+  "update.browserDownload": "ブラウザでダウンロード",
 
   "error.LOGIN_FAILED": "雀魂のログインに失敗。認証情報を確認してください（error 151 はリソースバージョン更新が必要）",
   "error.VERSION_UPDATE_FAILED": "リソースバージョンを自動更新しましたがログインに失敗しました（error 151）。設定で MS_RES_VERSION を手動入力してください",

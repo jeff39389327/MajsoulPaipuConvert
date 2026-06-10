@@ -20,6 +20,7 @@ const state = {
   appVersion: '',
   systemLocale: 'en',
   backendAvailable: true,
+  releasesUrl: '', // 更新橫幅「改用瀏覽器下載」退路（由主程序依 publish 設定推導）
   config: { env: {}, crawler: null },
   doctor: null,
   crawlOutputFile: null, // Stage 1 完成後的輸出檔，供 Stage 2 自動接手
@@ -136,18 +137,29 @@ function setupUpdater() {
   if (!window.api.onUpdate) return;
   const banner = ensureUpdateBanner();
   const show = (html) => { banner.innerHTML = html; banner.hidden = false; };
+  // 在橫幅文字後附上「改用瀏覽器下載」連結（in-app 下載卡住時的退路）。
+  const withBrowserLink = (html) => {
+    show(`<span>${html}</span>`);
+    if (state.releasesUrl && window.api.openExternal) {
+      const link = document.createElement('button');
+      link.className = 'ghost';
+      link.textContent = t('update.browserDownload');
+      link.onclick = () => window.api.openExternal(state.releasesUrl);
+      banner.append(link);
+    }
+  };
 
   window.api.onUpdate((ev) => {
     if (!ev || !ev.state) return;
     if (ev.state === 'available') {
-      show(`<span>${t('update.available', { version: ev.version || '' })}</span>`);
+      withBrowserLink(t('update.available', { version: ev.version || '' }));
     } else if (ev.state === 'progress') {
-      show(`<span>${t('update.downloading', {
+      withBrowserLink(t('update.downloading', {
         percent: ev.percent ?? 0,
         speed: `${humanBytes(ev.bytesPerSecond)}/s`,
         transferred: humanBytes(ev.transferred),
         total: humanBytes(ev.total),
-      })}</span>`);
+      }));
     } else if (ev.state === 'downloaded') {
       banner.innerHTML = '';
       banner.append(
@@ -279,6 +291,7 @@ async function bootstrap() {
   state.appVersion = st.appVersion || '';
   state.systemLocale = st.systemLocale;
   state.backendAvailable = st.backendAvailable;
+  state.releasesUrl = st.releasesUrl || '';
 
   await initI18n(state.settings.locale || mapSystemLocale(state.systemLocale));
   await refreshConfig();

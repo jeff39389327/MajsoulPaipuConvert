@@ -13,6 +13,18 @@ const { REPO_ROOT, resolveBackend, isPackaged } = require('./pythonLocator');
 
 let mainWindow = null;
 
+// 由 electron-builder 的 publish url（.../releases/download/latest）推出人類可讀的
+// releases 頁（.../releases），供「改用瀏覽器下載」退路使用。讀不到就回 GitHub 首頁式空字串。
+function releasesPageUrl() {
+  try {
+    const pub = require('../package.json').build.publish;
+    const url = (Array.isArray(pub) ? pub[0] : pub).url || '';
+    return url.replace(/\/download\/[^/]*\/?$/, '').replace(/\/+$/, '');
+  } catch (_) {
+    return '';
+  }
+}
+
 // ---- 單一設定檔 config.ini -----------------------------------------------
 // primary：使用者選定的「執行檔同層」(dev 為 repo root)；mirror：userData 備援。
 // 升級(NSIS)會清掉同層檔，故每次寫入同步鏡像、開機自動還原（見 configIni.js）。
@@ -175,6 +187,7 @@ function registerIpc() {
       appVersion: app.getVersion(),
       systemLocale: app.getLocale(),
       backendAvailable: !!resolveBackend({ pythonPath: settings.pythonPath }),
+      releasesUrl: releasesPageUrl(), // 更新橫幅的「改用瀏覽器下載」退路
     };
   });
 
@@ -210,6 +223,13 @@ function registerIpc() {
   ipcMain.handle('shell:showItem', (_e, p) => {
     if (!p) return false;
     shell.showItemInFolder(p);
+    return true;
+  });
+
+  // 用預設瀏覽器開啟外部網址（更新橫幅的「改用瀏覽器下載」退路）。
+  ipcMain.handle('shell:openExternal', (_e, url) => {
+    if (!url || !/^https?:\/\//i.test(url)) return false;
+    shell.openExternal(url);
     return true;
   });
 

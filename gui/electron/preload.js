@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   // 以系統檔案管理員開啟資料夾 / 標示檔案 (方便找到輸出)
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   showItem: (p) => ipcRenderer.invoke('shell:showItem', p),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   // i18n 語系資料
   loadLocales: () => ipcRenderer.invoke('i18n:list'),

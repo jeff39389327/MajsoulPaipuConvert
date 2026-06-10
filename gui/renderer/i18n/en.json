@@ -157,6 +157,7 @@
   "update.restart": "Restart and update now",
   "update.later": "Later",
   "update.checking": "Checking for updates…",
+  "update.browserDownload": "Download in browser instead",
 
   "error.LOGIN_FAILED": "Mahjong Soul login failed; check credentials (or error 151 needs a new resource version)",
   "error.VERSION_UPDATE_FAILED": "Auto-updated the resource version but login still failed (error 151); set MS_RES_VERSION manually in Settings",
