@@ -43,6 +43,12 @@ API_MIRRORS = [
     "https://4-data.amae-koromo.com",
 ]
 _UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+# 共享連線池（keep-alive）：避免每發請求都重做 DNS 查詢＋TLS 握手——
+# 長時間收集時上千次 getaddrinfo 會把本機/路由器 DNS 打到暫時失靈（NameResolutionError）
+_SESSION = requests.Session()
+_SESSION.headers.update(_UA)
+# 整輪鏡像全失敗後的退避秒數（多半是本地 DNS / 網路抖動，等幾秒就會恢復）
+_RETRY_BACKOFF = [3, 8, 20, 45, 90]
 _SLICE_SECONDS = 6 * 3600     # games 端點單批上限 500；玉/王座約 6h 內安全，超量自動二分
 _ENUM_CAP = 500               # 單批達此值視為被截，需把時間窗再切半
 _PAGE_LIMIT = 1000
@@ -63,18 +69,27 @@ def _is_full(u) -> bool:
 
 
 def _get(path: str, params: dict) -> object:
-    """GET 一個 amae-koromo API（鏡像失效自動換下一個），回傳解析後 JSON。全失敗才 raise。"""
+    """GET 一個 amae-koromo API，回傳解析後 JSON。
+
+    鏡像失效自動換下一個；整輪鏡像全失敗則按 _RETRY_BACKOFF 退避後重來
+    （本地 DNS 抽風／網路抖動幾秒內會自癒），全部用盡才 raise。
+    """
     last_err = None
-    for base in API_MIRRORS:
-        try:
-            r = requests.get(base + path, params=params, headers=_UA, timeout=20)
-            if r.status_code == 200:
-                time.sleep(random.uniform(*_REQ_DELAY))
-                return r.json()
-            last_err = f"HTTP {r.status_code}: {r.text[:120]}"
-        except Exception as exc:  # noqa: BLE001 - 換鏡像重試
-            last_err = repr(exc)
-        time.sleep(random.uniform(*_REQ_DELAY))
+    for attempt, wait in enumerate([0] + _RETRY_BACKOFF):
+        if wait:
+            _log(f"[api] 整輪鏡像失敗（{last_err}），{wait}s 後重試"
+                 f"（第 {attempt}/{len(_RETRY_BACKOFF)} 次）")
+            time.sleep(wait)
+        for base in API_MIRRORS:
+            try:
+                r = _SESSION.get(base + path, params=params, timeout=20)
+                if r.status_code == 200:
+                    time.sleep(random.uniform(*_REQ_DELAY))
+                    return r.json()
+                last_err = f"HTTP {r.status_code}: {r.text[:120]}"
+            except requests.RequestException as exc:
+                last_err = repr(exc)
+            time.sleep(random.uniform(*_REQ_DELAY))
     raise RuntimeError(f"amae-koromo API 請求失敗 {path} params={params} -> {last_err}")
 
 
