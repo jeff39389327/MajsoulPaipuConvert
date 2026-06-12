@@ -160,6 +160,9 @@ function setupUpdater() {
         transferred: humanBytes(ev.transferred),
         total: humanBytes(ev.total),
       }));
+    } else if (ev.state === 'stalled') {
+      // 自動下載多次停滯（網路對 GitHub 資產域名悶死）：明確請使用者改走瀏覽器。
+      withBrowserLink(t('update.stalled', { version: ev.version || '' }));
     } else if (ev.state === 'downloaded') {
       banner.innerHTML = '';
       banner.append(

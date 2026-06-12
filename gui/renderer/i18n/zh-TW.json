@@ -153,6 +153,7 @@
   "update.restart": "立即重啟並更新",
   "update.later": "稍後",
   "update.checking": "正在檢查更新…",
+  "update.stalled": "自動下載新版 {version} 多次逾時（網路連不上 GitHub 下載點），請改用瀏覽器下載安裝",
   "update.browserDownload": "改用瀏覽器下載",
 
   "error.LOGIN_FAILED": "雀魂登入失敗，請確認帳號密碼（或 error 151 需更新資源版本）",

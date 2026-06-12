@@ -153,6 +153,7 @@
   "update.restart": "Restart and update now",
   "update.later": "Later",
   "update.checking": "Checking for updates…",
+  "update.stalled": "Auto-download of {version} kept stalling (cannot reach the GitHub download host); please download and install via browser",
   "update.browserDownload": "Download in browser instead",
 
   "error.LOGIN_FAILED": "Mahjong Soul login failed; check credentials (or error 151 needs a new resource version)",
