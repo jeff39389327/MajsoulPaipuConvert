@@ -23,10 +23,8 @@ collect_timing = true
 save_debug = false
 # 保存雀魂原始 GameDetailRecords JSON（啟用會自動開啟 collect_timing）。
 save_raw_json = true
-# 效能：同時下載數（建議 3）／同時轉換數（0＝依 CPU 核心自動）／強制逐筆下載。
-download_concurrency = 3
+# 效能：同時轉換數（0＝依 CPU 核心自動）。下載固定逐筆串行（雀魂單帳號單連線）。
 convert_concurrency = 0
-sequential_download = false
 
 [crawler]
 # 最後一次使用的爬取設定（GUI 會覆寫；CLI 直接以此產生 crawler_config.json 依據）。

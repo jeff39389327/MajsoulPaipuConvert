@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-"""run_download —— 包裝 Stage 2 (下載 + 轉換)，並加入並行化。
+"""run_download —— 包裝 Stage 2 (下載 + 轉換)。
 
 與既有 toumajsoul.py 的關係
 ---------------------------
 重用其核心函式 `download_single_log` / `process_log` (不重寫下載與 timing 注入邏輯)，
-只重寫 main 外殼：讀清單、跳過已下載、登入一次、**並行調度**、emit 進度。
+只重寫 main 外殼：讀清單、跳過已下載、登入一次、調度、emit 進度。
 
-並行策略 (見計畫)
------------------
-- 下載並發：雀魂單一 websocket lobby 有狀態、同帳號多登入會互踢 -> 單一 downloader、
-  登入一次，用 Semaphore(download_concurrency) 控制同時請求數 (預設 3，可調，亦可序列)。
+調度策略
+--------
+- 下載**嚴格串行**：雀魂單一 websocket 只掛一個帳號、會話有狀態，同時多個 RPC
+  在線上不被允許（使用者明確要求「同時只能一個號、不可並行」）；並行也會與
+  AccountSession 的連線復原互撞。故一次只有一個下載請求在線上。
 - 轉換並發：mjai-reviewer 是外部 binary，可安全多開 -> Semaphore(convert_concurrency)
-  (預設 = CPU 核心，上限 8)。吞吐主要來自這裡。
+  (預設 = CPU 核心，上限 8)。下載完成即丟背景轉換，不阻塞下一筆下載。
 
 失敗復原 (download_recovery，repo root 共用模組)
 ------------------------------------------------
@@ -90,10 +91,7 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     if save_raw_json and not collect_timing:
         collect_timing = True
 
-    download_concurrency = int(params.get("download_concurrency", 3))
     convert_concurrency = int(params.get("convert_concurrency", min(8, os.cpu_count() or 4)))
-    if params.get("sequential_download"):
-        download_concurrency = 1
 
     # 輸出落在 work_dir
     os.chdir(work_dir)
@@ -124,7 +122,6 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     retrying = [u for u in unique_ids if u in checkpoint.failed]
 
     bridge.stage_start("download", total=total, collect_timing=collect_timing,
-                       download_concurrency=download_concurrency,
                        convert_concurrency=convert_concurrency,
                        accounts=len(accounts), input_list=input_path)
     if retrying:
@@ -136,12 +133,12 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
         bridge.done(ok=True)
         return
 
-    dl_sem = asyncio.Semaphore(download_concurrency)
     mj_sem = asyncio.Semaphore(convert_concurrency)
     counters = {"dl": 0, "cv": 0, "fail": 0}
     done_uuids: set = set()
     failures: list[dict] = []
     state = {"aborted": False}
+    convert_tasks: list = []
     max_attempts = 3 if len(accounts) > 1 else 2
 
     async with MajsoulPaipuDownloader() as downloader:
@@ -159,18 +156,24 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
             return
 
         async def download_fn(uuid: str):
-            async with dl_sem:
-                return await download_single_log(uuid, downloader, collect_timing)
+            return await download_single_log(uuid, downloader, collect_timing)
 
-        async def worker(uuid: str) -> None:
-            if state["aborted"]:
-                return
+        async def convert(uuid: str, log, timing, full) -> None:
+            await process_log(uuid, log, base_dir, timing, full,
+                              save_debug, save_raw_json, mjai_semaphore=mj_sem)
+            counters["cv"] += 1
+            bridge.progress("convert", phase="mjai", done=counters["cv"], total=total,
+                            uuid=uuid, ok=True)
+
+        # 下載嚴格串行（單帳號單連線，一次只一個 RPC 在線上）；
+        # 轉換丟背景 task 並行跑，不阻塞下一筆下載。
+        for uuid in unique_ids:
             try:
                 log, timing, full, err = await download_recovery.download_with_retry(
                     session, download_fn, uuid, max_attempts=max_attempts)
             except download_recovery.AllAccountsFailed:
                 state["aborted"] = True
-                return
+                break
             done_uuids.add(uuid)
             counters["dl"] += 1
             if not log:
@@ -180,17 +183,15 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
                                           session.current_username)
                 bridge.progress("download", phase="download", done=counters["dl"],
                                 total=total, uuid=uuid, ok=False, failed=counters["fail"])
-                return
+                continue
             checkpoint.clear_failure(uuid)
             bridge.progress("download", phase="download", done=counters["dl"], total=total,
                             uuid=uuid, ok=True, failed=counters["fail"])
-            await process_log(uuid, log, base_dir, timing, full,
-                              save_debug, save_raw_json, mjai_semaphore=mj_sem)
-            counters["cv"] += 1
-            bridge.progress("convert", phase="mjai", done=counters["cv"], total=total,
-                            uuid=uuid, ok=True)
+            convert_tasks.append(asyncio.create_task(convert(uuid, log, timing, full)))
 
-        await asyncio.gather(*(worker(u) for u in unique_ids))
+        # 中止與否都要等已下載的牌譜轉完，避免漏寫 mjai 輸出。
+        if convert_tasks:
+            await asyncio.gather(*convert_tasks)
 
     # 清理暫存
     try:

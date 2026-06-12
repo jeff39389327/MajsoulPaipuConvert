@@ -52,9 +52,7 @@ function defaultSettings() {
     workDir: '', // 留空＝自動：dev 用 repo root，凍結版用執行檔同層的可寫資料夾 (見 defaultWorkDir)
     pythonPath: '',
     locale: '',
-    downloadConcurrency: 3,
-    convertConcurrency: 0, // 0 = 後端自動 (CPU 核心)
-    sequentialDownload: false,
+    convertConcurrency: 0, // 0 = 後端自動 (CPU 核心)；下載固定串行（單帳號單連線，後端硬定）
     autoDownloadAfterCrawl: true, // 收集完 ID 後自動接續 Stage 2（下載＋轉換）
   };
 }
@@ -97,9 +95,7 @@ function migrateLegacyIfNeeded() {
       pythonPath: guiSettings.pythonPath || '',
       locale: guiSettings.locale || '',
       autoDownloadAfterCrawl: guiSettings.autoDownloadAfterCrawl !== false,
-      downloadConcurrency: guiSettings.downloadConcurrency != null ? guiSettings.downloadConcurrency : 3,
       convertConcurrency: guiSettings.convertConcurrency != null ? guiSettings.convertConcurrency : 0,
-      sequentialDownload: !!guiSettings.sequentialDownload,
     });
   }
 }
@@ -313,11 +309,9 @@ function registerIpc() {
       },
       params || {}
     );
-    // 為下載 job 注入並發設定
+    // 為下載 job 注入並發設定（下載本身固定串行，僅轉換可並發）
     if (kind === 'download') {
-      if (settings.downloadConcurrency) merged.download_concurrency = settings.downloadConcurrency;
       if (settings.convertConcurrency) merged.convert_concurrency = settings.convertConcurrency;
-      merged.sequential_download = !!settings.sequentialDownload;
     }
     return pyRunner.startJob(kind, { params: merged, pythonPath: settings.pythonPath }, send);
   });

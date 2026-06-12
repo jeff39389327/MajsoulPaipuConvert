@@ -14,8 +14,7 @@ const path = require('path');
 const SCHEMA = {
   account: ['ms_username', 'ms_password', 'ms_res_version', 'account_pool'],
   download: [
-    'collect_timing', 'save_debug', 'save_raw_json',
-    'download_concurrency', 'convert_concurrency', 'sequential_download',
+    'collect_timing', 'save_debug', 'save_raw_json', 'convert_concurrency',
   ],
   crawler: [
     'crawler_mode', 'output_filename', 'headless_mode', 'fast_mode', 'paipu_limit',
@@ -30,7 +29,7 @@ const DEFAULTS = {
   account: { ms_username: '', ms_password: '', ms_res_version: '', account_pool: '' },
   download: {
     collect_timing: 'true', save_debug: 'false', save_raw_json: 'true',
-    download_concurrency: '3', convert_concurrency: '0', sequential_download: 'false',
+    convert_concurrency: '0',
   },
   crawler: {
     crawler_mode: 'date_room', output_filename: 'date_room_list.txt',
@@ -43,7 +42,7 @@ const DEFAULTS = {
 
 const SECTION_COMMENT = {
   account: '# 雀魂帳號（中國伺服器）。ms_res_version 平常留空，error 151 時自動寫回。\n# account_pool 為備用帳號池（JSON 陣列 [{"username":"...","password":"..."}]），下載失敗時依序切換。',
-  download: '# 下載 / 轉換選項與效能。布林用 true/false；convert_concurrency=0 表自動。',
+  download: '# 下載 / 轉換選項與效能。布林用 true/false；convert_concurrency=0 表自動。下載固定串行（單帳號單連線）。',
   crawler: '# 爬取設定（最後一次使用的值）。多值（time_periods/ranks/manual_player_urls）逗號分隔。',
   app: '# GUI 偏好。work_dir 留空＝執行檔同層；locale 留空＝跟隨系統。',
 };

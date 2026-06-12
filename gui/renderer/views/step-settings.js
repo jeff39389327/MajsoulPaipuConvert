@@ -14,9 +14,7 @@ export function renderSettings(ctx, container) {
     COLLECT_TIMING: (env.COLLECT_TIMING ?? 'true') === 'true',
     SAVE_DEBUG: (env.SAVE_DEBUG ?? 'false') === 'true',
     SAVE_RAW_JSON: (env.SAVE_RAW_JSON ?? 'false') === 'true',
-    downloadConcurrency: s.downloadConcurrency,
     convertConcurrency: s.convertConcurrency,
-    sequentialDownload: s.sequentialDownload,
     pythonPath: s.pythonPath || '',
     workDir: s.workDir || '',
     locale: ctx.getLocale(),
@@ -77,15 +75,10 @@ export function renderSettings(ctx, container) {
 
   // --- 效能與執行環境 ---
   container.append(h('div', { class: 'section-title' }, t('settings.section.runtime')));
-  container.append(h('div', { class: 'row' },
-    field(t('settings.download_concurrency.label'),
-      numberInput(form.downloadConcurrency, (v) => (form.downloadConcurrency = v), { min: 1, max: 16 }),
-      t('settings.download_concurrency.hint')),
-    field(t('settings.convert_concurrency.label'),
-      numberInput(form.convertConcurrency, (v) => (form.convertConcurrency = v), { min: 0, max: 32 }),
-      t('settings.convert_concurrency.hint'))));
-  container.append(field('', toggle(t('settings.sequential.label'), form.sequentialDownload, (v) => (form.sequentialDownload = v)),
-    t('settings.sequential.hint')));
+  // 下載固定串行（雀魂單帳號單連線，後端硬定），僅轉換並發可調。
+  container.append(field(t('settings.convert_concurrency.label'),
+    numberInput(form.convertConcurrency, (v) => (form.convertConcurrency = v), { min: 0, max: 32 }),
+    t('settings.convert_concurrency.hint')));
 
   // 工作目錄（含瀏覽）。留空時以 placeholder 顯示實際解析到的預設路徑（凍結版＝執行檔同層）。
   const workInput = textInput(form.workDir, (v) => (form.workDir = v),
@@ -153,9 +146,7 @@ export function renderSettings(ctx, container) {
       SAVE_RAW_JSON: form.SAVE_RAW_JSON ? 'true' : 'false',
     });
     await ctx.api.setSettings({
-      downloadConcurrency: form.downloadConcurrency,
       convertConcurrency: form.convertConcurrency,
-      sequentialDownload: form.sequentialDownload,
       pythonPath: form.pythonPath,
       workDir: form.workDir,
       locale: form.locale,

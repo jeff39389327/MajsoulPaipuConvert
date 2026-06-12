@@ -1,8 +1,8 @@
 # 雀魂牌譜 Pipeline — Electron 一體式 GUI
 
 把原本兩階段的 Python CLI（爬牌譜 ID → 下載＋轉換）包成一個引導式桌面 App：
-**選擇下載方式 → 下載 ID → 下載牌譜＋轉換 MJAI → 設定**，全程實時進度、可取消，
-並支援 Stage 2 並行下載與並行轉換。介面支援 i18n（繁中／English／日本語）。
+**選擇下載方式 → 下載 ID → 下載牌譜＋轉換 MJAI → 設定**，全程實時進度、可取消。
+下載逐筆串行（雀魂單帳號單連線），MJAI 轉換並行。介面支援 i18n（繁中／English／日本語）。
 
 ## 架構
 
@@ -14,7 +14,7 @@ gui/backend (Python)  ──►  NDJSON 事件（stdout）；原始 log → stde
    cli.py 子命令分派：crawl | download | doctor | __extractor
    run_crawler.py  → 啟動既有 scrapy spider（Stage 1）
    run_download.py → 重用 toumajsoul 的 download_single_log / process_log，
-                      並行調度（Semaphore 控制下載與 mjai 轉換並發）
+                      下載串行、mjai 轉換並行（Semaphore 控制轉換並發）
 ```
 
 - **事件協定**：stdout 每行一個 JSON（`stage_start｜progress｜log｜error｜stage_done｜done`）。
@@ -34,7 +34,7 @@ npm start          # 啟動 GUI
 npm test           # 後端 NDJSON 協定煙霧測試（不需 Chrome / 雀魂）
 ```
 
-設定頁可填雀魂帳密（寫入 repo 根的 `config.env`）、思考時間等選項、下載/轉換並發數、
+設定頁可填雀魂帳密（寫入 repo 根的 `config.env`）、思考時間等選項、轉換並發數、
 工作目錄與介面語言；爬蟲設定寫入 `paipu_project/paipu_project/crawler_config.json`。
 
 ## 打包（全凍結，Windows）

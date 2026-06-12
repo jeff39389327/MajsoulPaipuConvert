@@ -5,8 +5,7 @@
 // renderer 與 main.js 幾乎不用改：
 //   - env      : {ms_username, ms_password, MS_RES_VERSION, COLLECT_TIMING, SAVE_DEBUG, SAVE_RAW_JSON}
 //   - crawler  : CrawlerConfig 物件（陣列 / 數字 / 布林已還原型別）
-//   - settings : {workDir, pythonPath, locale, autoDownloadAfterCrawl, downloadConcurrency,
-//                 convertConcurrency, sequentialDownload}
+//   - settings : {workDir, pythonPath, locale, autoDownloadAfterCrawl, convertConcurrency}
 // 三者讀寫的是同一個 config.ini 的不同區段；每次寫入皆 read-modify-write 整檔並鏡像備援。
 
 const fs = require('fs');
@@ -84,12 +83,10 @@ const APP_TO_INI = {
   pythonPath: ['app', 'python_path'],
   locale: ['app', 'locale'],
   autoDownloadAfterCrawl: ['app', 'auto_download_after_crawl'],
-  downloadConcurrency: ['download', 'download_concurrency'],
   convertConcurrency: ['download', 'convert_concurrency'],
-  sequentialDownload: ['download', 'sequential_download'],
 };
-const APP_BOOL = new Set(['autoDownloadAfterCrawl', 'sequentialDownload']);
-const APP_INT = new Set(['downloadConcurrency', 'convertConcurrency']);
+const APP_BOOL = new Set(['autoDownloadAfterCrawl']);
+const APP_INT = new Set(['convertConcurrency']);
 
 function readSettings(primaryPath, mirrorPath) {
   const obj = configIni.readObj(primaryPath, mirrorPath);

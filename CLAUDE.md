@@ -132,13 +132,15 @@ The GUI owns `config.ini`; on error 151, the recovered `ms_res_version` is writt
 `{"username","password"}`; reaches Python as env `ACCOUNT_POOL`). `AccountSession` wraps the single
 shared `MajsoulPaipuDownloader`: on a download failure, `download_with_retry` first reconnects and
 re-logs-in with the *same* account (which covers error 151 via the auto resource-version update),
-then on the next failure rotates to the next pool account; a `generation` counter + asyncio lock
-ensures concurrent workers trigger only one recovery, and a ready-event fence (`wait_ready`, awaited
-at the top of each `download_with_retry` attempt) keeps concurrent workers from sending requests
-during the reconnect window — doing so hits a half-built channel (`'NoneType' object has no
-attribute 'send'`) or a connected-but-not-yet-logged-in session (server error 1004). Majsoul error
-codes seen here: 151 = resource version expired, 1004 = session not logged in (transient, retry),
-1203 = record does not exist (permanent). Only when *every* account fails to log in does
+then on the next failure rotates to the next pool account. **Downloads are strictly serial** — one
+account, one websocket, one in-flight RPC (user requirement; CLI and GUI both): only the mjai
+conversion fans out in parallel (GUI `run_download.py` spawns background convert tasks). The
+`generation` counter + asyncio lock + ready-event fence (`wait_ready` at the top of each
+`download_with_retry` attempt) remain as defense-in-depth: a request sent during the reconnect
+window hits a half-built channel (`'NoneType' object has no attribute 'send'`) or a
+connected-but-not-yet-logged-in session (server error 1004). Majsoul error codes seen here:
+151 = resource version expired, 1004 = session not logged in (transient, retry), 1203 = record
+does not exist (permanent). Only when *every* account fails to log in does
 it raise `AllAccountsFailed` — the run aborts and `Checkpoint` (`download_checkpoint.json` in the
 work dir) records the failed map (`uuid → {error, account, ts}`) and the still-pending list. Failed
 uuids are retried automatically on the next run (they're not in the tenhou dir, so the normal dedupe
