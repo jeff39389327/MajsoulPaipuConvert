@@ -45,8 +45,10 @@ class MajsoulPaipuDownloader:
 
     async def close(self):
         try:
-            if self.channel:
-                await self.channel.close()
+            # getattr: a failed first _connect() leaves the instance with no channel at all
+            channel = getattr(self, "channel", None)
+            if channel:
+                await channel.close()
         except ConnectionClosedError:
             pass
 
@@ -82,10 +84,15 @@ class MajsoulPaipuDownloader:
                else:
                    raise RuntimeError("Cannot detect endpoint. Response: " + await res.text())
 
-        self.channel = MSRPCChannel(self.endpoint)
-        self.lobby = Lobby(self.channel)
-        self.route = Route(self.channel)
-        await self.route_connect(channel=self.channel, route=self.route, route_id=self.route_id)
+        channel = MSRPCChannel(self.endpoint)
+        lobby = Lobby(channel)
+        route = Route(channel)
+        await self.route_connect(channel=channel, route=route, route_id=self.route_id)
+        # publish only after the websocket is fully connected — concurrent callers
+        # otherwise hit a half-built channel (_ws is still None -> AttributeError on send)
+        self.channel = channel
+        self.lobby = lobby
+        self.route = route
         if self.with_http_server:
             asyncio.create_task(self.sustain(route=self.route))
 

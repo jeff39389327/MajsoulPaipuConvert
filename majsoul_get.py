@@ -51,9 +51,9 @@ async def run(uuids, base_dir):
             if not u:
                 continue
             print(f"\n下載: {u}")
-            log, timing, full = await T.download_single_log(u, dl, collect_timing)
+            log, timing, full, err = await T.download_single_log(u, dl, collect_timing)
             if not log:
-                print("  ✗ 下載失敗 (牌譜不存在或無權限)")
+                print(f"  ✗ 下載失敗: {err or '牌譜不存在或無權限'}")
                 continue
             print(f"  ✓ 下載成功，局數={len(log.get('log', []))} 玩家={log.get('name')}")
             await T.process_log(u, log, base_dir, timing, full, save_debug, save_raw)

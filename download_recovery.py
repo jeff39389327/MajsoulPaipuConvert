@@ -81,6 +81,11 @@ class AccountSession:
         self._generation = 0
         self._dead: set[int] = set()  # 本次執行中登入失敗的帳號（不再嘗試）
         self._lock = asyncio.Lock()
+        # 復原柵欄：重建連線（close→重連→重登）期間 clear，其他並發 worker 須等
+        # set 後才可發請求。否則會打中半建構的 channel（_ws=None → 'NoneType' has no
+        # attribute 'send'）或已連線但未登入的會話（伺服器回 error 1004）。
+        self._ready = asyncio.Event()
+        self._ready.set()
 
     @property
     def generation(self) -> int:
@@ -97,6 +102,11 @@ class AccountSession:
         async with self._lock:
             await self._login_any(start_offset=0, reconnect=False)
 
+    async def wait_ready(self) -> None:
+        """等待復原完成（無復原進行中時立即返回）。並發 worker 每次下載前應呼叫，
+        避免請求落在連線重建的窗口內白白燒掉重試次數。"""
+        await self._ready.wait()
+
     async def recover(self, seen_generation: int, force_switch: bool = False, reason: str = "") -> None:
         """下載失敗後的復原。先同帳號重連＋重登（涵蓋 151 版本換代與斷線），
         force_switch=True 時直接從下一個帳號開始輪替。"""
@@ -106,7 +116,13 @@ class AccountSession:
             self._generation += 1
             self._notify("SESSION_RECOVERING", reason)
             offset = 1 if (force_switch and len(self.accounts) > 1) else 0
-            await self._login_any(start_offset=offset, reconnect=True)
+            self._ready.clear()
+            try:
+                await self._login_any(start_offset=offset, reconnect=True)
+            finally:
+                # 失敗（含 AllAccountsFailed）也要放行，否則等柵欄的 worker 永久卡死；
+                # 放行後它們會自行失敗→recover→收到 AllAccountsFailed 而中止。
+                self._ready.set()
 
     async def _reconnect(self) -> None:
         """關閉並重開 websocket（換帳號或斷線後，舊連線狀態不可信）。"""
@@ -130,6 +146,11 @@ class AccountSession:
             try:
                 if reconnect:
                     await self._reconnect()
+            except Exception as exc:  # noqa: BLE001 重連失敗是網路問題，不算帳號死亡
+                last_exc = exc
+                print(f"重新連線失敗: {exc}")
+                continue
+            try:
                 await self._login_with_auto_update(acct)
             except Exception as exc:  # noqa: BLE001 換下一個帳號續試
                 last_exc = exc
@@ -272,6 +293,7 @@ async def download_with_retry(session: AccountSession, download_fn, uuid: str,
     """
     last_err = "unknown error"
     for attempt in range(max_attempts):
+        await session.wait_ready()  # 復原進行中先等，別把請求打進重建窗口
         gen = session.generation
         try:
             log, timing, full, err = await asyncio.wait_for(download_fn(uuid), timeout=timeout)
