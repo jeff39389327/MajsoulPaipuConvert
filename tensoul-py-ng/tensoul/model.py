@@ -45,6 +45,21 @@ class Tile(NamedTuple):
 
         return result
 
+    def encode_mjai(self) -> str:
+        """
+        MJAI tile string:
+           1m..9m / 1p..9p / 1s..9s        - number tiles
+           E,S,W,N,P,F,C                   - 1z..7z (winds + haku/hatsu/chun)
+           5mr,5pr,5sr                     - red fives (aka, num==0)
+        """
+        if self.type == TileType.Z:
+            # majsoul/tenhou 1z..7z -> E S W N P(白) F(發) C(中)
+            return "_ESWNPFC"[self.num]
+        suit = "mps"[self.type.value]
+        if self.num == 0:
+            return f"5{suit}r"
+        return f"{self.num}{suit}"
+
     @classmethod
     def parse(cls, text: str) -> "Tile":
         assert len(text) == 2

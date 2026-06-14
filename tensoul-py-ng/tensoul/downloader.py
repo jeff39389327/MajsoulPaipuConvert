@@ -316,6 +316,12 @@ class MajsoulPaipuDownloader:
         details.ParseFromString(wrapper.data)
 
         converter = MajsoulPaipuParser(tsumoloss_off=tsumoloss_off)
+        # mjai needs game-level info from the head: player names (per seat), whether
+        # aka fives are in play, and tonpuu(4)/hanchan(0) for kyoku_first.
+        aka_flag = bool(res["rule"].get("aka51") or res["rule"].get("aka52")
+                        or res["rule"].get("aka53"))
+        kyoku_first = 4 if record.head.config.mode.mode == 1 else 0
+        converter.set_mjai_header(res["name"], aka_flag, kyoku_first)
         if details.version < 210715 and len(details.records) > 0:
             for rec in details.records:
                 round_record_wrapper = pb.Wrapper()
@@ -337,6 +343,9 @@ class MajsoulPaipuDownloader:
                     converter.feed(log)
 
                     res["log"] = [e.dump() for e in converter.getvalue()]
+
+        # mjai event stream (sanma 3-seat / yonma 4-seat), built in lock-step above.
+        res["mjai"] = converter.finalize_mjai()
 
         res["playerMapping"] = self._preparePlayerMapping(record)
 

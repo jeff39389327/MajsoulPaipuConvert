@@ -148,6 +148,13 @@ async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, ful
     if save_debug:
         os.makedirs(debug_dir, exist_ok=True)
     
+    # tensoul 直出的 mjai 事件串流（三麻 3 席 / 四麻 4 席）。先從 tenhou6 dict 取出，
+    # 避免寫進 tenhou6 檔。三麻必用它（mjai-reviewer/convlog 硬性拒絕三麻）。
+    mjai_events = log_data.pop("mjai", None) if isinstance(log_data, dict) else None
+    # ratingc 是 downloader 寫的權威玩家數欄位（f"PF{nplayers}"，PF3=三麻/PF4=四麻）；
+    # 不要用 name 長度判斷（name 以 "AI" 佔位，語意是「名字槽位數」而非玩家數）。
+    is_sanma = isinstance(log_data, dict) and log_data.get("ratingc") == "PF3"
+
     # log_data 已經是 tenhou.net/6 格式的字典，直接保存
     try:
         tenhou_path = os.path.join(tenhou_dir, f"{record_uuid}.json")
@@ -157,39 +164,50 @@ async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, ful
         print(f"Error saving tenhou format for {record_uuid}: {str(e)}")
         return
 
-    # 暫存檔案用於 mjai 轉換
+    # 暫存檔案（四麻 mjai-reviewer 用；三麻不會寫，留作清理時的安全檢查）
     temp_file = f"temp_logs/{record_uuid}.json"
-    try:
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(log_data, f, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving temp file for {record_uuid}: {str(e)}")
-        return
+    mjai_temp = f"temp_logs/{record_uuid}_mjai.json"
 
     # 轉換為 mjai 格式
-    # mjai-reviewer 可由環境變數覆寫路徑 (凍結版指向內建的 mjai-reviewer.exe 絕對路徑)。
-    # mjai_semaphore (若提供) 限制同時並發的轉換數，讓 GUI 能並行轉換多個牌譜。
-    try:
-        mjai_bin = os.environ.get("MJAI_REVIEWER_BIN", "mjai-reviewer")
-        mjai_cmd = f'"{mjai_bin}" --no-review -i {temp_file} --mjai-out temp_logs/{record_uuid}_mjai.json'
-        # 用一個不限量的 Semaphore 當作「無限制」的 fallback，避免 nullcontext 在
-        # Python 3.8/3.9 不支援 async with 的問題。
-        sem = mjai_semaphore if mjai_semaphore is not None else asyncio.Semaphore(2 ** 31)
-        async with sem:
-            proc = await asyncio.create_subprocess_shell(
-                mjai_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr_data = await proc.communicate()
-        if proc.returncode != 0:
-            print(f"Warning: mjai conversion failed for {record_uuid}")
-            print(f"Error: {stderr_data.decode('utf-8', errors='replace')}")
-    except Exception as e:
-        print(f"Error executing mjai-reviewer: {str(e)}")
+    if is_sanma and mjai_events is not None:
+        # 三麻：mjai-reviewer (convlog) 硬性拒絕三麻 (disp 含「三」-> NotFourPlayer)，
+        # 改用 tensoul 直出、對齊 mortal-sanma libriichi3p 規格的 mjai 事件串流。
+        try:
+            with open(mjai_temp, "w", encoding="utf-8") as f:
+                for ev in mjai_events:
+                    f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"Error writing sanma mjai for {record_uuid}: {str(e)}")
+    else:
+        # 四麻：沿用 mjai-reviewer 把 tenhou6 -> mjai（與既有流程一致）。
+        # mjai-reviewer 可由環境變數覆寫路徑 (凍結版指向內建的 mjai-reviewer.exe 絕對路徑)。
+        # mjai_semaphore (若提供) 限制同時並發的轉換數，讓 GUI 能並行轉換多個牌譜。
+        try:
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(log_data, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving temp file for {record_uuid}: {str(e)}")
+            return
+        try:
+            mjai_bin = os.environ.get("MJAI_REVIEWER_BIN", "mjai-reviewer")
+            mjai_cmd = f'"{mjai_bin}" --no-review -i {temp_file} --mjai-out {mjai_temp}'
+            # 用一個不限量的 Semaphore 當作「無限制」的 fallback，避免 nullcontext 在
+            # Python 3.8/3.9 不支援 async with 的問題。
+            sem = mjai_semaphore if mjai_semaphore is not None else asyncio.Semaphore(2 ** 31)
+            async with sem:
+                proc = await asyncio.create_subprocess_shell(
+                    mjai_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr_data = await proc.communicate()
+            if proc.returncode != 0:
+                print(f"Warning: mjai conversion failed for {record_uuid}")
+                print(f"Error: {stderr_data.decode('utf-8', errors='replace')}")
+        except Exception as e:
+            print(f"Error executing mjai-reviewer: {str(e)}")
 
     # 如果有思考時間數據，注入到 mjai
-    mjai_temp = f"temp_logs/{record_uuid}_mjai.json"
     if os.path.exists(mjai_temp) and raw_timing_data:
         try:
             # 保存原始JSON（如果启用）

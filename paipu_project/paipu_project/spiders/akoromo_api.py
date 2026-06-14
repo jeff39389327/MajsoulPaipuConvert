@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 
 import requests
 
-# 房間名 → 雀魂 mode_id（與 date_room_extractor.RANK_ROOM_MAPPING 一致）
+# 房間名 → 雀魂 mode_id（四麻；與 date_room_extractor.RANK_ROOM_MAPPING 一致）
 ROOM_MODE: Dict[str, int] = {
     "Throne": 16,
     "Jade": 12,
@@ -34,6 +34,23 @@ ROOM_MODE: Dict[str, int] = {
     "Throne East": 15,
     "Jade East": 11,
     "Gold East": 8,
+}
+
+# 三麻 (sanma) 房間名 → 雀魂 mode_id（amae-koromo pl3；East=三人東, 預設=三人南）
+SANMA_ROOM_MODE: Dict[str, int] = {
+    "Throne": 26,
+    "Jade": 24,
+    "Gold": 22,
+    "Throne East": 25,
+    "Jade East": 23,
+    "Gold East": 21,
+}
+
+# game_mode -> (房間對應表, amae-koromo API 路徑段)。四麻走 pl4、三麻走 pl3，
+# 兩者的 games/player_records 端點與去遮蔽流程完全相同，只差路徑段與 mode_id。
+_GAME_MODES = {
+    "yonma": (ROOM_MODE, "pl4"),
+    "sanma": (SANMA_ROOM_MODE, "pl3"),
 }
 
 API_MIRRORS = [
@@ -93,28 +110,28 @@ def _get(path: str, params: dict) -> object:
     raise RuntimeError(f"amae-koromo API 請求失敗 {path} params={params} -> {last_err}")
 
 
-def _get_games(mode: int, start_ts: int, end_ts: int) -> List[dict]:
+def _get_games(pl: str, mode: int, start_ts: int, end_ts: int) -> List[dict]:
     data = _get(
-        f"/api/v2/pl4/games/{end_ts}/{start_ts}",
+        f"/api/v2/{pl}/games/{end_ts}/{start_ts}",
         {"limit": _PAGE_LIMIT, "mode": mode, "descending": "true"},
     )
     return data if isinstance(data, list) else []
 
 
-def _enumerate(mode: int, start_ts: int, end_ts: int) -> List[dict]:
+def _enumerate(pl: str, mode: int, start_ts: int, end_ts: int) -> List[dict]:
     """列舉 [start_ts, end_ts) 該房間對局；單批達上限（被截）則二分時間窗遞迴補齊。"""
-    games = _get_games(mode, start_ts, end_ts)
+    games = _get_games(pl, mode, start_ts, end_ts)
     if len(games) >= _ENUM_CAP and (end_ts - start_ts) > 600:
         mid = (start_ts + end_ts) // 2
         _log(f"[api] {len(games)} 筆達上限，時間窗二分 {start_ts}..{mid}..{end_ts}")
-        return _enumerate(mode, start_ts, mid) + _enumerate(mode, mid, end_ts)
+        return _enumerate(pl, mode, start_ts, mid) + _enumerate(pl, mode, mid, end_ts)
     return games
 
 
-def _get_player_records(account_id: int, mode: int, start_ts: int, end_ts: int) -> List[dict]:
+def _get_player_records(pl: str, account_id: int, mode: int, start_ts: int, end_ts: int) -> List[dict]:
     try:
         data = _get(
-            f"/api/v2/pl4/player_records/{account_id}/{end_ts}/{start_ts}",
+            f"/api/v2/{pl}/player_records/{account_id}/{end_ts}/{start_ts}",
             {"limit": _PLAYER_LIMIT, "mode": mode, "descending": "true"},
         )
     except RuntimeError as exc:
@@ -124,7 +141,7 @@ def _get_player_records(account_id: int, mode: int, start_ts: int, end_ts: int) 
 
 
 def _resolve_full_uuid(
-    game: dict, mode: int, win_start: int, win_end: int, cache: Dict[int, str]
+    pl: str, game: dict, mode: int, win_start: int, win_end: int, cache: Dict[int, str]
 ) -> Optional[str]:
     """把一局（含遮蔽短碼）還原成完整 UUID：用 startTime 對快取/ player_records 比對。"""
     st = game.get("startTime")
@@ -135,7 +152,7 @@ def _resolve_full_uuid(
         if not acc:
             continue
         # 拉該玩家整個時間窗的對局，全部折進快取（同房間後續對局多半免再請求）
-        for rec in _get_player_records(acc, mode, win_start, win_end):
+        for rec in _get_player_records(pl, acc, mode, win_start, win_end):
             u = rec.get("uuid") or rec.get("_id")
             rst = rec.get("startTime")
             if _is_full(u) and rst is not None:
@@ -164,28 +181,36 @@ def collect_room_paipus(
     end_date: str,
     output_file=None,
     existing_ids=None,
+    game_mode: str = "yonma",
 ) -> List[str]:
     """依房間 + 日期區間，透過 amae-koromo API 收集完整 UUID。
+
+    game_mode: "yonma"（四麻 pl4，預設）或 "sanma"（三麻 pl3）。三麻走 amae-koromo
+    的 pl3 端點與三麻 mode_id；去遮蔽流程（games -> player_records）完全相同。
 
     每收到一筆新 UUID 就 write+flush 到 output_file（凍結模式靠輪詢檔案回報進度），並
     print 到 stdout（dev 模式 run_crawler 解析 stdout 統計進度）。回傳本次新增的 UUID 清單。
     """
-    if target_room not in ROOM_MODE:
-        raise ValueError(f"未知房間 {target_room}，可用：{list(ROOM_MODE)}")
-    mode = ROOM_MODE[target_room]
+    gm = (game_mode or "yonma").lower()
+    if gm not in _GAME_MODES:
+        raise ValueError(f"未知 game_mode {game_mode}，可用：{list(_GAME_MODES)}")
+    room_map, pl = _GAME_MODES[gm]
+    if target_room not in room_map:
+        raise ValueError(f"未知房間 {target_room}（{gm}），可用：{list(room_map)}")
+    mode = room_map[target_room]
     existing = existing_ids if existing_ids is not None else set()
     cache: Dict[int, str] = {}      # startTime -> 完整 UUID（跨 slice 重用）
     collected: List[str] = []
     total_games = 0
     unresolved = 0
 
-    _log(f"[api] 開始：房間={target_room}(mode={mode}) 日期 {start_date}~{end_date}")
+    _log(f"[api] 開始：{gm} 房間={target_room}({pl} mode={mode}) 日期 {start_date}~{end_date}")
     for win_start, win_end in _iter_slices(start_date, end_date):
-        games = _enumerate(mode, win_start, win_end)
+        games = _enumerate(pl, mode, win_start, win_end)
         _log(f"[api] {datetime.fromtimestamp(win_start):%Y-%m-%d %H:%M} 起 6h：列舉 {len(games)} 局")
         for g in games:
             total_games += 1
-            full = _resolve_full_uuid(g, mode, win_start, win_end, cache)
+            full = _resolve_full_uuid(pl, g, mode, win_start, win_end, cache)
             if not full:
                 unresolved += 1
                 _log(f"[api] 無法還原 start={g.get('startTime')} "

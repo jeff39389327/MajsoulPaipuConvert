@@ -1,0 +1,35 @@
+diff --git a/libriichi/src/state/update.rs b/libriichi/src/state/update.rs
+index e262145..5cc8fd7 100644
+--- a/libriichi/src/state/update.rs
++++ b/libriichi/src/state/update.rs
+@@ -282,6 +282,13 @@ impl PlayerState {
+                     self.ankan_candidates.push(pai.deaka());
+                 }
+             }
++            // Sanma: kita-nuki (nukidora) is allowed during riichi (see the note
++            // further down — it is treated like an ankan that doesn't change the
++            // wait). The original code returned here before ever setting
++            // `can_nukidora`, which made every nukidora-after-riichi illegal even
++            // though real Majsoul/Tenhou allow it. Mirror the non-riichi gate.
++            self.last_cans.can_nukidora =
++                self.tehai[tuz!(N)] > 0 && self.tiles_left > 0 && self.kans_on_board < 4;
+             return Ok(());
+         }
+ 
+@@ -995,10 +1002,12 @@ impl PlayerState {
+             self.witness_tile(pai)?;
+             self.update_doras_owned(actor_rel, pai);
+         }
+-        // Both kans and kita-nuki replacements draw from the 4-tile rinshan;
+-        // bump the shared counter so can_{ankan,kakan,nukidora} all gate on
+-        // it and we never run the wall dry.
+-        self.kans_on_board += 1;
++        // NOTE: do NOT bump `kans_on_board` for a kita-nuki. `kans_on_board` is the
++        // 4-kan-abort counter that gates can_{ankan,kakan,daiminkan}; nukidora is not
++        // a kan and a player may legitimately pull all four Norths (plus make kans) in
++        // one kyoku, so counting nukidora here wrongly disabled later kans/nukidora.
++        // Running the wall dry is already prevented by the `tiles_left > 0` guard on
++        // every replacement draw (the rinshan tile is replenished from the live wall).
+         self.can_w_riichi = false;
+         Ok(())
+     }

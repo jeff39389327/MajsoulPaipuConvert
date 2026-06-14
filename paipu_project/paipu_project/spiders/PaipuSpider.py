@@ -61,6 +61,10 @@ class CrawlerConfig:
     end_date: str = None    # Format: "2019-08-23"
     target_room: str = None # Options: "Throne", "Jade", "Gold", "Throne East", "Jade East", "Gold East"
 
+    # date_room_api mode: "yonma" (4-player, default) or "sanma" (3-player, amae-koromo pl3).
+    # Only the pure-API date_room_api path supports sanma collection (Selenium modes are 4p-only).
+    game_mode: str = "yonma"
+
     # Output filename
     output_filename: str = "tonpuulist.txt"
 
@@ -171,9 +175,16 @@ class CrawlerConfig:
             if self.target_room not in valid_rooms:
                 raise ValueError(f"Invalid room: {self.target_room}. Valid options: {valid_rooms}")
 
+            # Validate game_mode (sanma collection only available on the pure-API mode)
+            if self.game_mode not in ("yonma", "sanma"):
+                raise ValueError(f"Invalid game_mode: {self.game_mode}. Valid options: ['yonma', 'sanma']")
+            if self.game_mode == "sanma" and self.crawler_mode != "date_room_api":
+                raise ValueError("sanma (3-player) collection is only supported in date_room_api mode")
+
             print(f"{self.crawler_mode} mode configuration validated")
             print(f"  Date range: {self.start_date} to {self.end_date}")
             print(f"  Target room: {self.target_room}")
+            print(f"  Game mode: {self.game_mode}")
 
         print("Overall configuration validated")
 
@@ -981,6 +992,7 @@ class PaipuSpider(scrapy.Spider):
                     self.config.end_date,
                     output_file=output_file,
                     existing_ids=self.processed_paipu_ids,
+                    game_mode=self.config.game_mode,
                 )
                 self.spider_closed(None)
 

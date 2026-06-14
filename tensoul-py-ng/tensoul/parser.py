@@ -16,6 +16,67 @@ class MajsoulPaipuParser:
         self.tsumoloss_off = tsumoloss_off
         self.allow_kigiage = allow_kigiage
 
+        # ---- MJAI direct output (sanma + yonma) ----
+        # Emitted in lock-step with the same in-order record walk that builds the
+        # tenhou.net/6 kyokus, so it reuses all of this parser's scoring/delta logic
+        # (pao, tsumo-loss, multi-ron delta split). Targets the mjai schema consumed
+        # by mortal-sanma's libriichi3p (3-seat for sanma, 4-seat for yonma): true
+        # NUM_PLAYERS seats, nukidora event, actors bounded to nplayers.
+        self.mjai = []
+        self._mjai_started = False
+        self._mjai_names = None
+        self._mjai_aka = True
+        self._mjai_kyoku_first = 0
+        self._mjai_dora_count = 0
+        self._pending_reach = None
+
+    def set_mjai_header(self, names, aka_flag, kyoku_first):
+        """Provide game-level info (from record.head) needed for the mjai start_game."""
+        self._mjai_names = list(names)
+        self._mjai_aka = bool(aka_flag)
+        self._mjai_kyoku_first = kyoku_first
+
+    def finalize_mjai(self):
+        """Return the full mjai event stream (appends end_game once). Call after feeding all records."""
+        if self._mjai_started:
+            self.mjai.append({"type": "end_game"})
+            self._mjai_started = False  # idempotent: a second call won't re-append
+        return self.mjai
+
+    def _me(self, **ev):
+        self.mjai.append(ev)
+
+    def _mjai_accept_riichi(self):
+        if self._pending_reach is not None:
+            self._me(type="reach_accepted", actor=self._pending_reach)
+            self._pending_reach = None
+
+    def _mjai_flush_dora(self):
+        # emit `dora` events for indicators revealed after the initial one (kan dora).
+        # index 0 is the kyoku's initial dora_marker (carried on start_kyoku), not an event.
+        while self._mjai_dora_count < len(self.cur.doras):
+            self._me(type="dora", dora_marker=self.cur.doras[self._mjai_dora_count].encode_mjai())
+            self._mjai_dora_count += 1
+
+    def _mjai_meld(self, log):
+        """Resolve (target, called pai, consumed) for chi/pon/daiminkan from `froms`.
+
+        majsoul gives `froms[i]` = seat each tile of `log.tiles` came from; the one
+        not from the calling seat is the claimed tile, and its owner is the target."""
+        tiles = list(log.tiles)
+        froms = list(getattr(log, "froms", []) or [])
+        called_idx = next((i for i, fr in enumerate(froms) if fr != log.seat),
+                          len(tiles) - 1)
+        target = froms[called_idx] if froms else self.ldseat
+        pai = Tile.parse(tiles[called_idx]).encode_mjai()
+        consumed = [Tile.parse(t).encode_mjai()
+                    for i, t in enumerate(tiles) if i != called_idx]
+        if log.type != 0:
+            # pon / daiminkan: consumed are all the same value; list the aka five last,
+            # matching mjai-reviewer's convention (chi keeps majsoul's order).
+            consumed.sort(key=lambda s: s.endswith("r"))
+        return target, pai, consumed
+
     def feed(self, log):
         if isinstance(log, pb.RecordNewRound):
             self._handle_new_round(log)
@@ -63,6 +124,28 @@ class MajsoulPaipuParser:
         self.paowind = -1  # seat of who dealt the final wind, -1 if no one is responsible
         self.paodrag = -1
 
+        # ---- MJAI: start_game (once) / start_kyoku / dealer's first draw ----
+        nplayers = self.cur.nplayers
+        if not self._mjai_started:
+            names = (self._mjai_names[:nplayers] if self._mjai_names
+                     else [f"player{i}" for i in range(nplayers)])
+            self._me(type="start_game", kyoku_first=self._mjai_kyoku_first,
+                     aka_flag=self._mjai_aka, names=names)
+            self._mjai_started = True
+        self._me(type="start_kyoku",
+                 bakaze="ESWN"[log.chang],
+                 dora_marker=self.cur.doras[0].encode_mjai(),
+                 kyoku=log.ju + 1,
+                 honba=log.ben,
+                 kyotaku=log.liqibang,
+                 oya=log.ju,
+                 scores=list(log.scores)[:nplayers],
+                 tehais=[[t.encode_mjai() for t in self.cur.haipais[i]] for i in range(nplayers)])
+        self._mjai_dora_count = 1
+        self._pending_reach = None
+        # dealer was dealt 14 tiles; tensoul popped the 14th into draws[oya] above
+        self._me(type="tsumo", actor=log.ju, pai=self.poppedtile.encode_mjai())
+
     def _handle_discard_tile(self, log):
         tile = Tile.parse(log.tile)
 
@@ -85,6 +168,14 @@ class MajsoulPaipuParser:
         if len(log.doras) > len(self.cur.doras):
             self.cur.doras = [Tile.parse(t) for t in log.doras]
 
+        # ---- MJAI: reach (before discard) / dahai / deferred reach_accepted ----
+        if log.is_liqi:
+            self._me(type="reach", actor=log.seat)
+        self._me(type="dahai", actor=log.seat, pai=tile.encode_mjai(), tsumogiri=tsumogiri)
+        if log.is_liqi:
+            self._pending_reach = log.seat
+        self._mjai_flush_dora()
+
     def _accept_riichi(self):
         if self.priichi:
             self.priichi = False
@@ -98,6 +189,13 @@ class MajsoulPaipuParser:
             self.cur.doras = [Tile.parse(t) for t in log.doras]
 
         self.cur.draws[log.seat].append(Tile.parse(log.tile))
+
+        # ---- MJAI: reach_accepted (if a riichi is pending) then the draw ----
+        # flush dora before tsumo: an ankan's new indicator is revealed on this
+        # (rinshan) draw record and must precede the drawn tile in mjai.
+        self._mjai_accept_riichi()
+        self._mjai_flush_dora()
+        self._me(type="tsumo", actor=log.seat, pai=Tile.parse(log.tile).encode_mjai())
 
     def _countpao(self, tile: Tile, owner: int, feeder: int):
         if tile.type != TileType.Z:
@@ -136,6 +234,13 @@ class MajsoulPaipuParser:
         else:
             raise RuntimeError(f"invalid RecordChiPengGang.type={log.type}")
 
+        # ---- MJAI: reach_accepted (if pending) then chi/pon/daiminkan ----
+        self._mjai_accept_riichi()
+        target, pai, consumed = self._mjai_meld(log)
+        self._me(type={0: "chi", 1: "pon", 2: "daiminkan"}[log.type],
+                 actor=log.seat, target=target, pai=pai, consumed=consumed)
+        self._mjai_flush_dora()
+
     def _handle_an_gang_add_gang(self, log):
         # NOTE: e.tiles here is a single tile; naki is placed in discards
         tile = Tile.parse(log.tiles)
@@ -146,6 +251,14 @@ class MajsoulPaipuParser:
             self._countpao(tile, log.seat, -1)  # count the group as visible, but don't set pao
             self.cur.discards[log.seat].append(AnkanSymbol(tile.deaka()))
             self.nkan += 1
+            # ---- MJAI: ankan (4 concealed tiles; include the aka five if in play) ----
+            base = tile.deaka()
+            if self._mjai_aka and base.num == 5 and base.type != TileType.Z:
+                consumed = [Tile(0, base.type).encode_mjai()] + [base.encode_mjai()] * 3
+            else:
+                consumed = [base.encode_mjai()] * 4
+            self._me(type="ankan", actor=log.seat, consumed=consumed)
+            self._mjai_flush_dora()
         elif log.type == 2:
             # kakan
             # find pon and swap in new symbol
@@ -153,6 +266,11 @@ class MajsoulPaipuParser:
                 if isinstance(sy, PonSymbol) and (sy.tile.deaka() == tile.deaka()):
                     self.cur.discards[log.seat].append(KakanSymbol(sy.a, sy.b, sy.tile, tile, sy.feeder_relative))
                     self.nkan += 1
+                    # ---- MJAI: kakan (added tile + the existing pon's 3 tiles) ----
+                    self._me(type="kakan", actor=log.seat, pai=tile.encode_mjai(),
+                             consumed=[sy.a.encode_mjai(), sy.b.encode_mjai(),
+                                       sy.tile.encode_mjai()])
+                    self._mjai_flush_dora()
                     break
         else:
             raise RuntimeError(f"invalid RecordAnGangAddGang.type={log.type}")
@@ -160,6 +278,9 @@ class MajsoulPaipuParser:
     def _handle_ba_bei(self, log):
         # kita - this record (only) gives {seat, moqie}
         self.cur.discards[log.seat].append(PeSymbol())
+
+        # ---- MJAI: nukidora (sanma north-pull bonus dora) ----
+        self._me(type="nukidora", actor=log.seat, pai="N")
 
     def _handle_liu_ju(self, log):
         self._accept_riichi()
@@ -174,6 +295,11 @@ class MajsoulPaipuParser:
             self.cur.result = SpecialRyukyoku.suukaikan
         else:
             raise RuntimeError(f"invalid RecordLiuJu.type={log.type}")
+
+        # ---- MJAI: abortive draw -> ryukyoku with no point movement ----
+        self._mjai_accept_riichi()
+        self._me(type="ryukyoku", deltas=[0] * self.cur.nplayers)
+        self._me(type="end_kyoku")
 
         self.kyokus.append(self.cur)
         self.cur = None
@@ -196,6 +322,10 @@ class MajsoulPaipuParser:
                     delta[i] += g
 
         self.cur.result = Ryukyoku(delta, getattr(log, "liujumanguan", False), all_noten, all_tempai)
+
+        # ---- MJAI: exhaustive draw -> ryukyoku with tenpai/noten deltas ----
+        self._me(type="ryukyoku", deltas=delta[:self.cur.nplayers])
+        self._me(type="end_kyoku")
 
         self.kyokus.append(self.cur)
         self.cur = None
@@ -318,6 +448,13 @@ class MajsoulPaipuParser:
             is_head_bump = False
 
         self.cur.result = Agari(agari=agari, uras=ura, round=self.cur.round)
+
+        # ---- MJAI: one hora per winner (deltas already split for multi-ron) ----
+        ura_m = [t.encode_mjai() for t in ura]
+        for a in agari:
+            self._me(type="hora", actor=a.seat, target=a.ldseat,
+                     deltas=list(a.delta)[:self.cur.nplayers], ura_markers=ura_m)
+        self._me(type="end_kyoku")
 
         self.kyokus.append(self.cur)
         self.cur = None
