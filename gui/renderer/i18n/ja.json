@@ -2,6 +2,8 @@
   "app.title": "雀魂牌譜ダウンローダー",
   "app.subtitle": "ID収集 → 牌譜DL → MJAI変換を一括で",
 
+  "a11y.skipToContent": "メインコンテンツへスキップ",
+
   "nav.settings": "設定",
   "nav.mode": "方式の選択",
   "nav.crawl": "ID収集",
@@ -62,7 +64,14 @@
   "settings.python_path.hint": "空欄で自動検出。パッケージ版は内蔵済み",
   "settings.work_dir.label": "作業・出力フォルダ",
   "settings.work_dir.hint": "mahjong_logs の出力フォルダ。パッケージ版は既定で ドキュメント\\MajsoulPaipuGUI（更新後も牌譜は保持）、空欄で既定を使用",
+  "settings.section.appearance": "外観と言語",
+  "settings.theme.label": "外観テーマ",
+  "settings.theme.hint": "自動＝システムの明暗設定に従います。明るい環境はライト、暗い環境はダークなど、目に優しい方を選択してください",
+  "enum.theme.auto": "自動（システム）",
+  "enum.theme.light": "ライト",
+  "enum.theme.dark": "ダーク",
   "settings.locale.label": "表示言語",
+  "settings.saveHint": "外観と言語は即時プレビュー。「設定を保存」で全変更を保存します",
   "settings.saved": "設定を保存しました",
 
   "env.title": "環境チェック",

@@ -52,6 +52,7 @@ function defaultSettings() {
     workDir: '', // 留空＝自動：dev 用 repo root，凍結版用執行檔同層的可寫資料夾 (見 defaultWorkDir)
     pythonPath: '',
     locale: '',
+    theme: 'auto', // auto = 跟隨系統明暗；light / dark 為固定（readSettings 未設時回 ''，renderer 視為 auto）
     convertConcurrency: 0, // 0 = 後端自動 (CPU 核心)；下載固定串行（單帳號單連線，後端硬定）
     autoDownloadAfterCrawl: true, // 收集完 ID 後自動接續 Stage 2（下載＋轉換）
   };

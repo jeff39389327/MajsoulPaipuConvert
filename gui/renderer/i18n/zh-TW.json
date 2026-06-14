@@ -2,6 +2,8 @@
   "app.title": "雀魂牌譜下載工具",
   "app.subtitle": "爬取 ID → 下載牌譜 → 轉換 MJAI，一站完成",
 
+  "a11y.skipToContent": "跳至主要內容",
+
   "nav.settings": "設定",
   "nav.mode": "選擇下載方式",
   "nav.crawl": "下載 ID",
@@ -62,7 +64,14 @@
   "settings.python_path.hint": "留空則自動偵測；打包版已內建，不需設定",
   "settings.work_dir.label": "工作／輸出資料夾",
   "settings.work_dir.hint": "存放 mahjong_logs 輸出的資料夾；打包版預設為「文件\\MajsoulPaipuGUI」（更新不會刪除其中的牌譜），留空即用預設",
+  "settings.section.appearance": "外觀與語言",
+  "settings.theme.label": "外觀主題",
+  "settings.theme.hint": "自動＝跟隨系統的亮／暗設定；亮色適合明亮環境，暗色適合昏暗環境，依眼睛舒適度選擇",
+  "enum.theme.auto": "自動（跟隨系統）",
+  "enum.theme.light": "亮色",
+  "enum.theme.dark": "暗色",
   "settings.locale.label": "介面語言",
+  "settings.saveHint": "外觀與語言即時預覽；按「儲存設定」才會永久保存全部變更",
   "settings.saved": "設定已儲存",
 
   "env.title": "環境檢查",

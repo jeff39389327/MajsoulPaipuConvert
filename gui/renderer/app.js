@@ -233,9 +233,12 @@ function renderNav() {
   const nav = document.getElementById('nav');
   nav.innerHTML = '';
   for (const step of STEPS) {
-    const item = document.createElement('div');
-    item.className = 'nav-item' + (step.id === state.activeStep ? ' active' : '');
-    item.innerHTML = `<span class="idx">${step.icon}</span><span>${t('nav.' + step.id)}</span>`;
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'nav-item';
+    if (step.id === state.activeStep) item.setAttribute('aria-current', 'page');
+    // 步驟圖示僅為視覺輔助，對報讀器隱藏（已有文字標籤）。
+    item.innerHTML = `<span class="idx" aria-hidden="true">${step.icon}</span><span>${t('nav.' + step.id)}</span>`;
     item.onclick = () => navigate(step.id);
     nav.appendChild(item);
   }
@@ -303,6 +306,36 @@ function mapSystemLocale(loc) {
   return 'en';
 }
 
+// 介面語系 -> <html lang>（供報讀器斷字、字型挑選）。
+function localeToLang(loc) {
+  if (loc === 'zh-TW') return 'zh-Hant';
+  if (loc === 'ja') return 'ja';
+  return 'en';
+}
+function syncHtmlLang() {
+  document.documentElement.lang = localeToLang(getLocale());
+}
+
+// ---- 外觀主題（亮/暗/自動） --------------------------------------------
+// setting 為 'light' | 'dark' | 'auto'（空字串視為 auto，跟隨系統偏好）。
+let themeMql = null;
+function applyTheme(setting) {
+  const s = setting || (state.settings && state.settings.theme) || 'auto';
+  let resolved = s;
+  if (s !== 'light' && s !== 'dark') {
+    resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.dataset.theme = resolved;
+  // 自動模式才需跟著系統切換；監聽只掛一次。
+  if (window.matchMedia && !themeMql) {
+    themeMql = window.matchMedia('(prefers-color-scheme: light)');
+    themeMql.addEventListener('change', () => {
+      const cur = (state.settings && state.settings.theme) || 'auto';
+      if (cur !== 'light' && cur !== 'dark') applyTheme('auto');
+    });
+  }
+}
+
 // ---- 啟動 ---------------------------------------------------------------
 async function bootstrap() {
   const st = await window.api.getState();
@@ -316,6 +349,8 @@ async function bootstrap() {
   state.releasesUrl = st.releasesUrl || '';
 
   await initI18n(state.settings.locale || mapSystemLocale(state.systemLocale));
+  syncHtmlLang();
+  applyTheme();
   await refreshConfig();
 
   // 全域事件訂閱（只訂一次）
@@ -330,6 +365,7 @@ async function bootstrap() {
   toggle.onclick = () => {
     drawer.hidden = !drawer.hidden;
     toggle.textContent = drawer.hidden ? t('log.show') : t('log.hide');
+    toggle.setAttribute('aria-expanded', String(!drawer.hidden));
   };
   // 清除日誌：緩衝與畫面一起清（appendLog 以 logBuffer 為準，只清 DOM 會被下一幀蓋回來）。
   document.getElementById('log-clear').onclick = () => {
@@ -340,6 +376,7 @@ async function bootstrap() {
 
   // 語系變更時整體重繪
   onLocaleChange(() => {
+    syncHtmlLang();
     applyStaticI18n();
     renderNav();
     renderEnvBadge();
@@ -362,5 +399,7 @@ ctx.setLocale = (loc) => {
   setLocale(loc);
 };
 ctx.getLocale = getLocale;
+// 暴露給 settings view 即時預覽主題
+ctx.applyTheme = applyTheme;
 
 bootstrap();

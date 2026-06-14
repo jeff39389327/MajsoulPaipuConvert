@@ -2,6 +2,8 @@
   "app.title": "Mahjong Soul Paipu Downloader",
   "app.subtitle": "Collect IDs → download logs → convert to MJAI, all in one place",
 
+  "a11y.skipToContent": "Skip to main content",
+
   "nav.settings": "Settings",
   "nav.mode": "Choose method",
   "nav.crawl": "Collect IDs",
@@ -62,7 +64,14 @@
   "settings.python_path.hint": "Leave blank to auto-detect; packaged build has it bundled",
   "settings.work_dir.label": "Work / output folder",
   "settings.work_dir.hint": "Folder for mahjong_logs output; packaged build defaults to Documents\\MajsoulPaipuGUI (logs are kept across updates) — leave blank to use it",
+  "settings.section.appearance": "Appearance & language",
+  "settings.theme.label": "Appearance",
+  "settings.theme.hint": "Auto follows your system's light/dark setting; pick Light for bright rooms, Dark for dim ones — whatever is easiest on your eyes",
+  "enum.theme.auto": "Auto (system)",
+  "enum.theme.light": "Light",
+  "enum.theme.dark": "Dark",
   "settings.locale.label": "Interface language",
+  "settings.saveHint": "Appearance & language preview instantly; click Save to persist all changes",
   "settings.saved": "Settings saved",
 
   "env.title": "Environment check",

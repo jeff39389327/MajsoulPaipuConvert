@@ -47,4 +47,6 @@ target_room = Jade
 work_dir =
 python_path =
 locale =
+# 外觀主題：auto＝跟隨系統明暗，或 light / dark 固定。留空視同 auto。
+theme = auto
 auto_download_after_crawl = true

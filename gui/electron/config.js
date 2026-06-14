@@ -82,6 +82,7 @@ const APP_TO_INI = {
   workDir: ['app', 'work_dir'],
   pythonPath: ['app', 'python_path'],
   locale: ['app', 'locale'],
+  theme: ['app', 'theme'],
   autoDownloadAfterCrawl: ['app', 'auto_download_after_crawl'],
   convertConcurrency: ['download', 'convert_concurrency'],
 };

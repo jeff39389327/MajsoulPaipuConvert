@@ -1,36 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-Hant" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+    <meta name="color-scheme" content="dark light" />
     <title>MajsoulPaipuGUI</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <a href="#view" class="skip-link" data-i18n="a11y.skipToContent">跳至主要內容</a>
     <div id="app">
-      <aside id="sidebar">
+      <aside id="sidebar" aria-label="導覽">
         <div class="brand">
           <div class="brand-title" data-i18n="app.title">雀魂牌譜下載工具</div>
           <div class="brand-sub" data-i18n="app.subtitle"></div>
           <div id="gamemode-badge" class="gamemode-badge"></div>
         </div>
-        <nav id="nav"></nav>
-        <div id="env-badge" class="env-badge"></div>
+        <nav id="nav" aria-label="步驟"></nav>
+        <div id="env-badge" class="env-badge" role="status" aria-live="polite"></div>
       </aside>
       <main id="main">
-        <section id="view"></section>
+        <section id="view" tabindex="-1"></section>
       </main>
     </div>
 
     <footer id="statusbar">
-      <span id="status-text" class="status idle"></span>
+      <span id="status-text" class="status idle" role="status" aria-live="polite"></span>
       <div class="spacer"></div>
-      <button id="log-toggle" class="ghost"></button>
+      <button id="log-toggle" class="ghost" aria-expanded="false" aria-controls="log-drawer"></button>
       <button id="log-clear" class="ghost"></button>
       <button id="cancel-btn" class="danger" hidden></button>
     </footer>
-    <pre id="log-drawer" hidden></pre>
+    <pre id="log-drawer" tabindex="0" aria-label="原始輸出記錄" hidden></pre>
 
     <script type="module" src="app.js"></script>
   </body>

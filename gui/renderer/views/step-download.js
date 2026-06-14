@@ -22,8 +22,8 @@ export function renderDownload(ctx, container) {
   container.append(field(t('download.inputList.label'),
     h('div', { class: 'inline-input' }, listInput, browseBtn), t('download.inputList.hint')));
 
-  const dlBar = h('div', { class: 'bar' }, h('span'));
-  const cvBar = h('div', { class: 'bar' }, h('span'));
+  const dlBar = h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': t('download.phase.download') }, h('span'));
+  const cvBar = h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': t('download.phase.mjai') }, h('span'));
   const label = h('div', { class: 'progress-label' }, t('download.idle'));
   container.append(h('div', { class: 'progress-wrap dual' },
     h('div', { class: 'hint' }, t('download.phase.download')), dlBar,
@@ -39,6 +39,7 @@ export function renderDownload(ctx, container) {
   const setBar = (bar, done, tot) => {
     const pct = tot ? Math.round((done / tot) * 100) : 0;
     bar.querySelector('span').style.width = pct + '%';
+    bar.setAttribute('aria-valuenow', String(pct));
   };
 
   let dlDone = 0;

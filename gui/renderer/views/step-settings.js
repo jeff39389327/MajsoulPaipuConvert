@@ -18,6 +18,7 @@ export function renderSettings(ctx, container) {
     pythonPath: s.pythonPath || '',
     workDir: s.workDir || '',
     locale: ctx.getLocale(),
+    theme: s.theme || 'auto',
   };
 
   container.append(h('h1', { class: 'view-title' }, t('settings.title')));
@@ -99,8 +100,18 @@ export function renderSettings(ctx, container) {
     container.append(field(t('settings.python_path.label'), h('div', { class: 'inline-input' }, pyInput, pyBrowse), t('settings.python_path.hint')));
   }
 
-  // --- 語言 ---
-  container.append(h('div', { class: 'section-title' }, t('settings.section.lang')));
+  // --- 外觀與語言 ---
+  container.append(h('div', { class: 'section-title' }, t('settings.section.appearance')));
+  // 外觀主題：即時預覽（ctx.applyTheme），實際持久化於下方「儲存設定」。
+  const themeOptions = [
+    { value: 'auto', label: t('enum.theme.auto') },
+    { value: 'light', label: t('enum.theme.light') },
+    { value: 'dark', label: t('enum.theme.dark') },
+  ];
+  container.append(field(t('settings.theme.label'),
+    select(themeOptions, form.theme, (v) => { form.theme = v; if (ctx.applyTheme) ctx.applyTheme(v); }),
+    t('settings.theme.hint')));
+
   const localeOptions = [
     { value: 'zh-TW', label: '繁體中文' },
     { value: 'en', label: 'English' },
@@ -150,12 +161,16 @@ export function renderSettings(ctx, container) {
       pythonPath: form.pythonPath,
       workDir: form.workDir,
       locale: form.locale,
+      theme: form.theme,
     });
     state.settings = (await ctx.api.getState()).settings;
     await ctx.refreshConfig();
     ctx.toast(t('settings.saved'));
   } }, t('btn.save'));
-  container.append(h('div', { class: 'actions' }, save));
+  // 黏底主操作列：長表單捲動時「儲存設定」隨時按得到；左側提示哪些是即時、哪些需儲存。
+  container.append(h('div', { class: 'action-bar' },
+    h('span', { class: 'save-hint' }, t('settings.saveHint')),
+    save));
 }
 
 function renderDoctorPanel(ctx) {

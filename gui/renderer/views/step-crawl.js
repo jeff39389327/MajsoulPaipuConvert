@@ -14,7 +14,7 @@ export function renderCrawl(ctx, container) {
   }
 
   const label = h('div', { class: 'progress-label' }, t('crawl.idle'));
-  const bar = h('div', { class: 'bar' }, h('span'));
+  const bar = h('div', { class: 'bar', role: 'progressbar', 'aria-label': t('crawl.title') }, h('span'));
   container.append(h('div', { class: 'progress-wrap' }, bar, label));
 
   const result = h('div');

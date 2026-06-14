@@ -50,12 +50,13 @@ export function renderMode(ctx, container) {
   container.append(h('h1', { class: 'view-title' }, t('mode.title')));
   container.append(h('p', { class: 'view-sub' }, t('mode.subtitle')));
 
-  // 模式卡片
-  const cards = h('div', { class: 'cards' });
+  // 模式卡片（單選）：用真正的 <button aria-pressed>，置於 role=group，鍵盤可達、報讀器可辨。
+  const cards = h('div', { class: 'cards', role: 'group', 'aria-label': t('mode.crawler_mode.label') });
   for (const m of MODES) {
-    const card = h('div', { class: 'card' + (form.crawler_mode === m ? ' on' : '') },
-      h('div', { class: 'card-title' }, t('mode.' + m + '.label')),
-      h('div', { class: 'card-desc' }, t('mode.' + m + '.desc')));
+    const on = form.crawler_mode === m;
+    const card = h('button', { type: 'button', class: 'card' + (on ? ' on' : ''), 'aria-pressed': String(on) },
+      h('span', { class: 'card-title' }, t('mode.' + m + '.label')),
+      h('span', { class: 'card-desc' }, t('mode.' + m + '.desc')));
     card.onclick = () => {
       form.crawler_mode = m;
       // 切換預設輸出檔名
@@ -123,7 +124,7 @@ export function renderMode(ctx, container) {
     await ctx.api.writeCrawler(buildConfig(form));
     ctx.navigate('crawl');
   } }, t('btn.next'));
-  container.append(h('div', { class: 'actions' }, h('div', { class: 'spacer' }), next));
+  container.append(h('div', { class: 'action-bar' }, next));
 }
 
 // 只輸出該模式相關欄位（避免寫入無關鍵造成混淆，但保留 spider 接受的欄位）
