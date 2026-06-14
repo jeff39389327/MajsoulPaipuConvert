@@ -87,16 +87,17 @@ export function renderMode(ctx, container) {
       field(t('mode.field.end_date'), textInput(form.end_date, (v) => (form.end_date = v), { type: 'date' }))));
     fields.append(field(t('mode.field.target_room'),
       select(ROOMS.map((r) => ({ value: r, label: t('enum.rank.' + r) })), form.target_room, (v) => (form.target_room = v))));
-    // 三/四麻選擇：僅純 API 模式 (date_room_api) 支援三麻收集 (pl3)；Selenium 模式只有四麻。
-    // 非 API 模式時不顯示此選單，且 buildConfig 一律送 yonma（唯一權威重設點，毋需在此變異 form）。
-    if (form.crawler_mode === 'date_room_api') {
-      fields.append(field(t('mode.field.game_mode'),
-        select([
-          { value: 'yonma', label: t('enum.gameMode.yonma') },
-          { value: 'sanma', label: t('enum.gameMode.sanma') },
-        ], form.game_mode, (v) => (form.game_mode = v)),
-        t('mode.field.game_mode.hint')));
-    }
+  }
+
+  // 三/四麻選擇：適用 auto / date_room / date_room_player / date_room_api（四麻走 amae-koromo
+  // 預設站、三麻走 ikeda 站，路由結構相同）。manual 模式的牌種由貼上的網址決定，不顯示此選單。
+  if (form.crawler_mode !== 'manual') {
+    fields.append(field(t('mode.field.game_mode'),
+      select([
+        { value: 'yonma', label: t('enum.gameMode.yonma') },
+        { value: 'sanma', label: t('enum.gameMode.sanma') },
+      ], form.game_mode, (v) => { form.game_mode = v; if (ctx.refreshGameMode) ctx.refreshGameMode(); }),
+      t('mode.field.game_mode.hint')));
   }
 
   // 通用欄位
@@ -134,6 +135,8 @@ export function buildConfig(form) {
     fast_mode: form.fast_mode,
     paipu_limit: form.paipu_limit,
   };
+  // 牌種適用所有收集模式（auto / date_room*），唯 manual 由貼上的網址決定，不送 game_mode。
+  if (form.crawler_mode !== 'manual') base.game_mode = form.game_mode || 'yonma';
   if (form.crawler_mode === 'auto') {
     return Object.assign(base, {
       time_periods: form.time_periods,
@@ -149,7 +152,5 @@ export function buildConfig(form) {
     start_date: form.start_date,
     end_date: form.end_date,
     target_room: form.target_room,
-    // 三麻僅 date_room_api 支援；其餘 date_room 模式一律送四麻（defaultForm 已保證 game_mode 有值）。
-    game_mode: form.crawler_mode === 'date_room_api' ? form.game_mode : 'yonma',
   });
 }

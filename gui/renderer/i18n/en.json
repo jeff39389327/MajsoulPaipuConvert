@@ -104,7 +104,7 @@
   "mode.field.end_date": "End date",
   "mode.field.target_room": "Target room",
   "mode.field.game_mode": "Game type",
-  "mode.field.game_mode.hint": "Sanma (3-player) is only supported in the pure-API (date_room_api) mode and collects amae-koromo 3-player rooms; download/convert auto-detect sanma and emit the matching mjai.",
+  "mode.field.game_mode.hint": "Choose 4-player or 3-player (sanma) collection; sanma uses amae-koromo's 3-player ranking/rooms (ikeda site). In the player-list mode the game type follows the pasted URLs. Download/convert auto-detect sanma and emit the matching mjai.",
   "enum.gameMode.yonma": "4-player",
   "enum.gameMode.sanma": "3-player (sanma)",
   "mode.field.output_filename": "Output filename",

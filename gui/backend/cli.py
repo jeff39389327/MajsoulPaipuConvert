@@ -34,6 +34,7 @@ def _run_extractor(args: list[str]) -> None:
     parser.add_argument("--headless", default="True")
     parser.add_argument("--fast", default="False")
     parser.add_argument("--player-mode", default="False")
+    parser.add_argument("--game-mode", default="yonma")
     ns = parser.parse_args(args)
 
     from date_room_extractor import OptimizedPaipuExtractor, convert_ranks_to_english
@@ -43,6 +44,7 @@ def _run_extractor(args: list[str]) -> None:
         headless=ns.headless == "True",
         fast_mode=ns.fast == "True",
         player_mode=ns.player_mode == "True",
+        game_mode=ns.game_mode,
     )
     try:
         results = extractor.extract_from_rooms(

@@ -47,6 +47,34 @@ RANK_ROOM_MAPPING = {
     "Gold East": 8
 }
 
+# 三麻 (sanma) 房間名 → 雀魂 mode_id（amae-koromo pl3；與 akoromo_api.SANMA_ROOM_MODE 一致）。
+SANMA_RANK_ROOM_MAPPING = {
+    "Throne": 26,
+    "Jade": 24,
+    "Gold": 22,
+    "Throne East": 25,
+    "Jade East": 23,
+    "Gold East": 21
+}
+
+# game_mode → amae-koromo 前端網域。四麻走預設站；三麻走 ikeda 站。兩站路由結構完全相同
+# （/{date}/{mode}、/player/{id}/{mode}、/ranking/delta），差別只在：網域決定後端 API 走
+# pl3 還 pl4，以及房間 mode_id 用哪張表（四麻 8~16 / 三麻 21~26）。
+GAME_MODE_DOMAIN = {
+    "yonma": "amae-koromo.sapk.ch",
+    "sanma": "ikeda.sapk.ch",
+}
+
+
+def get_room_mapping(game_mode):
+    """依 game_mode 取房間名→mode_id 對應表（sanma 用三麻表，其餘四麻）。"""
+    return SANMA_RANK_ROOM_MAPPING if (game_mode or "yonma").lower() == "sanma" else RANK_ROOM_MAPPING
+
+
+def get_base_domain(game_mode):
+    """依 game_mode 取 amae-koromo 前端網域（sanma→ikeda，其餘→預設站）。"""
+    return GAME_MODE_DOMAIN.get((game_mode or "yonma").lower(), GAME_MODE_DOMAIN["yonma"])
+
 SLEEP_TIME = 0  # Speed up
 
 # API请求延迟配置（秒）- 用于避免请求过快被拦截
@@ -57,7 +85,7 @@ CLICK_DELAY_MAX = 0.3        # 点击最大延迟
 
 class OptimizedPaipuExtractor:
 
-    def __init__(self, headless=True, fast_mode=False, player_mode=False):
+    def __init__(self, headless=True, fast_mode=False, player_mode=False, game_mode="yonma"):
         """
         Args:
             headless: 是否使用无头模式
@@ -66,10 +94,17 @@ class OptimizedPaipuExtractor:
                       True: 快速模式，跳过部分扫描（快但可能漏 5-10%）
             player_mode: True 表示啟用逐玩家頁面模式（date_room_player），
                          每局會依序進入所有玩家頁面收集所有牌譜 ID
+            game_mode: "yonma"（四麻，預設）或 "sanma"（三麻）。三麻改走 ikeda 網域與三麻
+                       房間 mode_id；房間/玩家頁路由結構與四麻完全相同，僅網域與 mode 不同。
         """
         self.headless = headless
         self.fast_mode = fast_mode
         self.player_mode = player_mode
+        self.game_mode = (game_mode or "yonma").lower()
+        self.base_domain = get_base_domain(self.game_mode)
+        self.room_mapping = get_room_mapping(self.game_mode)
+        # mode_id → 房間名（顯示用反查表，依 game_mode 取對應 mode 表，三麻才不會落到 'Unknown'）。
+        self.room_rank_mapping = {v: k for k, v in self.room_mapping.items()}
         self.driver = None
         self.temp_user_data_dir = None
         # 目標日期的 YYMMDD 前綴（如 "251110"），於 extract_from_rooms 設定；player 模式據此過濾牌譜
@@ -325,9 +360,9 @@ class OptimizedPaipuExtractor:
     def get_room_urls_by_ranks(self, target_date, target_ranks):
         room_urls = []
         for rank in target_ranks:
-            if rank in RANK_ROOM_MAPPING:
-                room_number = RANK_ROOM_MAPPING[rank]
-                room_url = f"https://amae-koromo.sapk.ch/{target_date}/{room_number}"
+            if rank in self.room_mapping:
+                room_number = self.room_mapping[rank]
+                room_url = f"https://{self.base_domain}/{target_date}/{room_number}"
                 room_urls.append({
                     'url': room_url,
                     'rank': rank,
@@ -712,7 +747,7 @@ class OptimizedPaipuExtractor:
                     return None, session_id
 
                 room_number = room_info['room_number']
-                room_rank = room_info.get('rank', ROOM_RANK_MAPPING.get(room_number, 'Unknown'))
+                room_rank = room_info.get('rank', self.room_rank_mapping.get(room_number, 'Unknown'))
 
                 # 直接構建帶房間篩選的 URL
                 if player_href:
@@ -1149,7 +1184,7 @@ class OptimizedPaipuExtractor:
             original_scroll_position = self.driver.execute_script("return window.pageYOffset;")
 
             room_number = room_info["room_number"]
-            room_rank = room_info.get("rank", ROOM_RANK_MAPPING.get(room_number, "Unknown"))
+            room_rank = room_info.get("rank", self.room_rank_mapping.get(room_number, "Unknown"))
 
             print(f"\n{'='*60}", file=sys.stderr)
             print(f"[PlayerMode] 處理遊戲（逐玩家模式）", file=sys.stderr)

@@ -11,7 +11,7 @@ export function renderSettings(ctx, container) {
     ms_username: env.ms_username || '',
     ms_password: env.ms_password || '',
     MS_RES_VERSION: env.MS_RES_VERSION || '',
-    COLLECT_TIMING: (env.COLLECT_TIMING ?? 'true') === 'true',
+    COLLECT_TIMING: (env.COLLECT_TIMING ?? 'false') === 'true',
     SAVE_DEBUG: (env.SAVE_DEBUG ?? 'false') === 'true',
     SAVE_RAW_JSON: (env.SAVE_RAW_JSON ?? 'false') === 'true',
     convertConcurrency: s.convertConcurrency,

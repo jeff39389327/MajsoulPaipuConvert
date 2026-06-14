@@ -218,6 +218,7 @@ const ctx = {
   api: window.api,
   navigate,
   rerender: () => navigate(state.activeStep),
+  refreshGameMode: () => renderGameModeBadge(),
   runJob,
   cancelJob,
   setStatus,
@@ -252,6 +253,22 @@ function renderEnvBadge() {
   el.textContent = ok ? '✓ ' + t('env.ok') : '⚠ ' + t('env.fail');
 }
 
+// 目前牌種（四麻/三麻）徽章——標題列全程顯示。優先用使用者在「選擇下載方式」頁的即時
+// 選擇（state.crawlerForm），其次回退已存設定（state.config.crawler），預設四麻。
+function currentGameMode() {
+  const fromForm = state.crawlerForm && state.crawlerForm.game_mode;
+  const fromCfg = state.config && state.config.crawler && state.config.crawler.game_mode;
+  return (fromForm || fromCfg || 'yonma');
+}
+
+function renderGameModeBadge() {
+  const el = document.getElementById('gamemode-badge');
+  if (!el) return;
+  const gm = currentGameMode() === 'sanma' ? 'sanma' : 'yonma';
+  el.className = 'gamemode-badge ' + gm;
+  el.textContent = '🀄 ' + t('enum.gameMode.' + gm);
+}
+
 function navigate(stepId) {
   if (activeCleanup) {
     activeCleanup();
@@ -259,6 +276,7 @@ function navigate(stepId) {
   }
   state.activeStep = stepId;
   renderNav();
+  renderGameModeBadge();
   const view = document.getElementById('view');
   view.innerHTML = '';
   const step = STEPS.find((s) => s.id === stepId);
@@ -275,6 +293,7 @@ function applyStaticI18n() {
   document.getElementById('log-clear').textContent = t('log.clear');
   document.getElementById('cancel-btn').textContent = t('btn.cancel');
   setStatus(state.jobStatus);
+  renderGameModeBadge();
 }
 
 function mapSystemLocale(loc) {

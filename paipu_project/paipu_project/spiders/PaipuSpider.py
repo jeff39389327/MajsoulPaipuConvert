@@ -131,6 +131,12 @@ class CrawlerConfig:
         if self.crawler_mode not in valid_modes:
             raise ValueError(f"Invalid crawler mode: {self.crawler_mode}. Valid options: {valid_modes}")
 
+        # Validate game_mode (global). sanma (3-player) is now supported across the API mode and
+        # the Selenium modes (auto / date_room / date_room_player) by switching to the ikeda domain
+        # and sanma room mode_ids. In manual mode the game type follows the pasted player URLs.
+        if self.game_mode not in ("yonma", "sanma"):
+            raise ValueError(f"Invalid game_mode: {self.game_mode}. Valid options: ['yonma', 'sanma']")
+
         # Validate corresponding parameters based on mode
         if self.crawler_mode == "manual":
             if not self.manual_player_urls or len(self.manual_player_urls) == 0:
@@ -174,12 +180,6 @@ class CrawlerConfig:
             # Validate room
             if self.target_room not in valid_rooms:
                 raise ValueError(f"Invalid room: {self.target_room}. Valid options: {valid_rooms}")
-
-            # Validate game_mode (sanma collection only available on the pure-API mode)
-            if self.game_mode not in ("yonma", "sanma"):
-                raise ValueError(f"Invalid game_mode: {self.game_mode}. Valid options: ['yonma', 'sanma']")
-            if self.game_mode == "sanma" and self.crawler_mode != "date_room_api":
-                raise ValueError("sanma (3-player) collection is only supported in date_room_api mode")
 
             print(f"{self.crawler_mode} mode configuration validated")
             print(f"  Date range: {self.start_date} to {self.end_date}")
@@ -297,6 +297,23 @@ def create_stealth_driver(headless_mode: bool, extra_args: List[str] = None):
     apply_stealth_js(driver)  # Apply anti-detection
     return driver, remote_port
 
+# game_mode → amae-koromo 前端網域（四麻=預設站；三麻=ikeda 站，後端走 pl3）。
+# 兩站路由結構相同，auto 模式只需換網域＋換玩家頁的房間篩選 mode_id。
+GAME_MODE_DOMAIN = {
+    "yonma": "amae-koromo.sapk.ch",
+    "sanma": "ikeda.sapk.ch",
+}
+# auto 模式玩家頁的房間篩選 mode_id（沿用既有四麻=12=玉南；三麻對應 24=三玉南）。
+AUTO_PLAYER_FILTER_MODE = {
+    "yonma": "12",
+    "sanma": "24",
+}
+
+
+def _domain_for(game_mode: str) -> str:
+    return GAME_MODE_DOMAIN.get((game_mode or "yonma").lower(), GAME_MODE_DOMAIN["yonma"])
+
+
 def get_rank_display_name(rank: str) -> Dict[str, str]:
     """Get rank display name mapping"""
     rank_mapping = {
@@ -320,7 +337,7 @@ def get_period_display_name(period: str) -> str:
     }
     return period_mapping.get(period, period)
 
-def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False, output_file=None, player_mode: bool = False) -> List[str]:
+def execute_date_room_extractor_py(target_date: str, target_room: str, headless_mode: bool = True, fast_mode: bool = False, output_file=None, player_mode: bool = False, game_mode: str = "yonma") -> List[str]:
     """
     Execute date_room_extractor.py and get the output paipu ID list
 
@@ -347,10 +364,11 @@ def main():
     max_paipus = 99999
     headless_mode = {headless_mode}
     fast_mode = {fast_mode}
+    game_mode = "{game_mode}"
 
     target_ranks = convert_ranks_to_english(target_ranks)
 
-    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode, player_mode={player_mode})
+    extractor = OptimizedPaipuExtractor(headless=headless_mode, fast_mode=fast_mode, player_mode={player_mode}, game_mode=game_mode)
 
     try:
         results = extractor.extract_from_rooms(
@@ -373,7 +391,8 @@ if __name__ == "__main__":
         target_room=target_room,
         headless_mode=str(headless_mode),
         fast_mode=str(fast_mode),
-        player_mode=str(player_mode)
+        player_mode=str(player_mode),
+        game_mode=game_mode
     )
 
     # 凍結 (PyInstaller) 模式下，sys.executable 是 backend.exe 而非 python，且沒有
@@ -389,6 +408,7 @@ if __name__ == "__main__":
             '--headless', str(headless_mode),
             '--fast', str(fast_mode),
             '--player-mode', str(player_mode),
+            '--game-mode', str(game_mode),
         ]
     else:
         # Create temporary file
@@ -535,6 +555,7 @@ def collect_paipus_by_date_room(config: CrawlerConfig, output_file=None, player_
                     fast_mode=config.fast_mode,
                     output_file=output_file,  # 傳遞 output_file 以實現即時寫入
                     player_mode=player_mode,
+                    game_mode=config.game_mode,
                 )
             except Exception as e:
                 print(f"Error processing {date_str}: {e}")
@@ -627,7 +648,10 @@ def find_rank_checkbox(driver, rank: str):
 
     Returns (None, None, None) if neither label is present on the page.
     """
-    for label_text in (rank, get_rank_display_name(rank)):
+    # 嘗試英文 → 中文（四麻，如「王座」）→ 中文三麻（如「三王座」，ikeda 站排行榜篩選）。
+    # 三麻候選對四麻頁面找不到也無害，只是多試一個 XPath。
+    zh = get_rank_display_name(rank)
+    for label_text in (rank, zh, "三" + zh):
         try:
             rank_label = driver.find_element(
                 By.XPATH,
@@ -688,8 +712,8 @@ def get_top_players_urls(config: CrawlerConfig):
     all_player_urls = []
 
     try:
-        # Access ranking page
-        driver.get("https://amae-koromo.sapk.ch/ranking/delta")
+        # Access ranking page（三麻走 ikeda 站的同結構排行榜）
+        driver.get(f"https://{_domain_for(config.game_mode)}/ranking/delta")
 
         # Wait for page load complete
         WebDriverWait(driver, 15).until(
@@ -765,7 +789,8 @@ def get_top_players_urls(config: CrawlerConfig):
                     seen_players.add(player_id)
                     unique_player_urls.append(url)
 
-        print(f"Obtained {len(unique_player_urls)} unique player URLs (/12 mode)")
+        _filter_mode = AUTO_PLAYER_FILTER_MODE.get((config.game_mode or 'yonma').lower(), '12')
+        print(f"Obtained {len(unique_player_urls)} unique player URLs (/{_filter_mode} mode)")
 
         if config.save_screenshots:
             rank_suffix = "_".join(config.ranks).lower()
@@ -835,7 +860,8 @@ def extract_positive_ranking_players(driver, period, config: CrawlerConfig):
                     player_id = player_id_match.group(1)
                     if player_id not in seen_players:
                         seen_players.add(player_id)
-                        base_url = f"https://amae-koromo.sapk.ch/player/{player_id}/12"
+                        base_url = (f"https://{_domain_for(config.game_mode)}"
+                                    f"/player/{player_id}/{AUTO_PLAYER_FILTER_MODE.get((config.game_mode or 'yonma').lower(), '12')}")
                         url = f"{base_url}?limit={config.paipu_limit}"
                         player_urls.append(url)
                         print(f"Added player URL ({period}): {url}")

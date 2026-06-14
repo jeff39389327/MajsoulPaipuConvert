@@ -85,7 +85,7 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     # 設定 (params 覆寫 > config.env > 預設)
     username = params.get("username") or os.getenv("ms_username", "")
     password = params.get("password") or os.getenv("ms_password", "")
-    collect_timing = params.get("collect_timing", _bool_env("COLLECT_TIMING", True))
+    collect_timing = params.get("collect_timing", _bool_env("COLLECT_TIMING", False))
     save_debug = params.get("save_debug", _bool_env("SAVE_DEBUG", False))
     save_raw_json = params.get("save_raw_json", _bool_env("SAVE_RAW_JSON", False))
     if save_raw_json and not collect_timing:

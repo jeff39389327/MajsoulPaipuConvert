@@ -331,8 +331,8 @@ async def main():
     temp_dir = "temp_logs"
     temp_file = "temp_ids.txt"
     
-    # 是否收集思考時間（從環境變數讀取，默認為 true）
-    collect_timing = os.getenv("COLLECT_TIMING", "true").lower() == "true"
+    # 是否收集思考時間（從環境變數讀取，默認為 false）
+    collect_timing = os.getenv("COLLECT_TIMING", "false").lower() == "true"
     
     # 是否保存debug信息（從環境變數讀取，默認為 false）
     save_debug = os.getenv("SAVE_DEBUG", "false").lower() == "true"

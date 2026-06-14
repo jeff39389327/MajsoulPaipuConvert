@@ -34,6 +34,14 @@ body {
 }
 .brand-title { font-weight: 700; font-size: 16px; }
 .brand-sub { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.4; }
+/* 目前牌種徽章（標題列全程顯示）。三麻用強調色，四麻用中性色，一眼分辨。 */
+.gamemode-badge {
+  display: inline-flex; align-self: flex-start; align-items: center;
+  margin-top: 10px; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; border: 1px solid var(--border);
+  color: var(--muted); background: var(--panel-2);
+}
+.gamemode-badge.sanma { color: #fff; background: var(--accent-2); border-color: transparent; }
 #nav { margin-top: 20px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;

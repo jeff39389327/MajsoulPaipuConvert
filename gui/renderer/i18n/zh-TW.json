@@ -104,7 +104,7 @@
   "mode.field.end_date": "結束日期",
   "mode.field.target_room": "目標房間",
   "mode.field.game_mode": "遊戲類型",
-  "mode.field.game_mode.hint": "三麻僅「純 API（date_room_api）」模式支援，會抓取 amae-koromo 三人房間；下載與轉換會自動辨識三麻並輸出對應 mjai。",
+  "mode.field.game_mode.hint": "選擇收集四麻或三麻；三麻會改抓 amae-koromo 三人榜／三人房間（ikeda 站）。「指定玩家」模式的牌種由貼上的網址決定，不受此選項影響。下載與轉換會自動辨識三麻並輸出對應 mjai。",
   "enum.gameMode.yonma": "四麻",
   "enum.gameMode.sanma": "三麻",
   "mode.field.output_filename": "輸出檔名",

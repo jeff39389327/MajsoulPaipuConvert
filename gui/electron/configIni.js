@@ -19,7 +19,7 @@ const SCHEMA = {
   crawler: [
     'crawler_mode', 'output_filename', 'headless_mode', 'fast_mode', 'paipu_limit',
     'time_periods', 'ranks', 'max_players_per_period', 'save_screenshots',
-    'manual_player_urls', 'start_date', 'end_date', 'target_room',
+    'manual_player_urls', 'start_date', 'end_date', 'target_room', 'game_mode',
   ],
   app: ['work_dir', 'python_path', 'locale', 'auto_download_after_crawl'],
 };
@@ -28,7 +28,7 @@ const SCHEMA = {
 const DEFAULTS = {
   account: { ms_username: '', ms_password: '', ms_res_version: '', account_pool: '' },
   download: {
-    collect_timing: 'true', save_debug: 'false', save_raw_json: 'true',
+    collect_timing: 'false', save_debug: 'false', save_raw_json: 'false',
     convert_concurrency: '0',
   },
   crawler: {
@@ -36,6 +36,7 @@ const DEFAULTS = {
     headless_mode: 'true', fast_mode: 'false', paipu_limit: '9999',
     time_periods: '', ranks: '', max_players_per_period: '20', save_screenshots: 'true',
     manual_player_urls: '', start_date: '', end_date: '', target_room: 'Jade',
+    game_mode: 'yonma',
   },
   app: { work_dir: '', python_path: '', locale: '', auto_download_after_crawl: 'true' },
 };

@@ -27,7 +27,7 @@ async def run(uuids, base_dir):
     dotenv.load_dotenv("config.env")
     account = os.getenv("ms_username", "")
     password = os.getenv("ms_password", "")
-    collect_timing = os.getenv("COLLECT_TIMING", "true").lower() == "true"
+    collect_timing = os.getenv("COLLECT_TIMING", "false").lower() == "true"
     save_raw = os.getenv("SAVE_RAW_JSON", "false").lower() == "true"
     save_debug = os.getenv("SAVE_DEBUG", "false").lower() == "true"
     if save_raw:

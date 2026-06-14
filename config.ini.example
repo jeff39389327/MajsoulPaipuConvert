@@ -17,12 +17,12 @@ ms_res_version =
 account_pool =
 
 [download]
-# 思考時間：在 MJAI 中加入每手 think_ms（預設 true）。
-collect_timing = true
+# 思考時間：在 MJAI 中加入每手 think_ms（預設 false）。
+collect_timing = false
 # 另存思考時間對照表與原始動作，供除錯（預設 false）。
 save_debug = false
 # 保存雀魂原始 GameDetailRecords JSON（啟用會自動開啟 collect_timing）。
-save_raw_json = true
+save_raw_json = false
 # 效能：同時轉換數（0＝依 CPU 核心自動）。下載固定逐筆串行（雀魂單帳號單連線）。
 convert_concurrency = 0
 

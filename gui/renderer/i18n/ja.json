@@ -104,7 +104,7 @@
   "mode.field.end_date": "終了日",
   "mode.field.target_room": "対象の部屋",
   "mode.field.game_mode": "ゲーム種別",
-  "mode.field.game_mode.hint": "三人麻雀は純API（date_room_api）モードのみ対応。amae-koromo の三人部屋を収集します。ダウンロード・変換は三麻を自動判定して対応する mjai を出力します。",
+  "mode.field.game_mode.hint": "四人麻雀か三人麻雀を選択。三人麻雀は amae-koromo の三人ランキング/三人部屋（ikeda サイト）を収集します。「プレイヤー指定」モードは貼り付けた URL で種別が決まります。ダウンロード・変換は三麻を自動判定して対応する mjai を出力します。",
   "enum.gameMode.yonma": "四人麻雀",
   "enum.gameMode.sanma": "三人麻雀",
   "mode.field.output_filename": "出力ファイル名",
