@@ -203,6 +203,12 @@ def process_one(token: str, base_dir: str, run_mjai: bool, exe: str,
 
 
 def main(argv=None):
+    # Windows 主控台預設可能是 cp950(Big5)，印 ✓/✗ 等字元會 UnicodeEncodeError 中斷整批；強制 UTF-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(
         description="下載天鳳牌譜並轉成 MJAI (支援三/四麻，繞過 mjai-reviewer 已失效的天鳳下載)。")
     p.add_argument("tokens", nargs="*", help="天鳳牌譜 ID 或網址 (可多個)")
