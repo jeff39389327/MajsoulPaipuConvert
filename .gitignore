@@ -3,6 +3,10 @@ new_log/
 tonpuulist.txt
 tonpuulog/
 mahjong_logs/
+# 天鳳資料夾（自抓或從 release 解壓的鳳凰卓 mjai，數量龐大，勿進版控）
+TENHOU/
+# tenhou_collect.py 產出的天鳳 id 清單
+tenhou_ids.txt
 majsoul.py
 a.py
 temp_logs/
