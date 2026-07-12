@@ -161,7 +161,8 @@ function setupUpdater() {
         total: humanBytes(ev.total),
       }));
     } else if (ev.state === 'stalled') {
-      // 自動下載多次停滯（網路對 GitHub 資產域名悶死）：明確請使用者改走瀏覽器。
+      // 自動下載多次失敗（實際原因在 ev.reason／updater.log，曾見 404 檔名不符與 CDN 悶死）：
+      // 明確請使用者改走瀏覽器。文案保持通用，別斷言失敗原因。
       withBrowserLink(t('update.stalled', { version: ev.version || '' }));
     } else if (ev.state === 'downloaded') {
       banner.innerHTML = '';

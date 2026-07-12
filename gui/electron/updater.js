@@ -21,6 +21,14 @@
 // 重來又卡在同一處」的惡性循環（實測：台灣本機從 GitHub 抓 122MB，尾段差 ~1.2KB 被 30s watchdog
 // 取消三次，最後誤報「連不上 GitHub」）。
 //
+// 2026-07 真因：先前「每次都在尾段/同一處失敗」的主因是**檔名不一致的 404**，不是網路——
+// electron-builder NSIS 預設檔名含空格（"MajsoulPaipuGUI Setup x.y.z.exe"），上傳 GitHub
+// Releases 時資產檔名的空格會被 GitHub 自動改成點（"MajsoulPaipuGUI.Setup.x.y.z.exe"），
+// 但 latest.yml 內仍是空格檔名 → generic provider 依 yml 組出的下載 URL 一律 404。
+// 根治：package.json 的 build.artifactName 改用連字號（無空格），yml 與資產名永遠一致；
+// CI 發佈後另有一步驗證兩者相符。watchdog 保留，作為 CDN 真悶死時的防護。
+// 教訓：最終失敗請帶上實際原因（見 stalled 事件的 reason），別再寫死推測性文案。
+//
 // 安全：僅在「已打包」時啟用；dev 模式呼叫 autoUpdater 會丟 "update config not found"，故直接 no-op。
 // 任何更新錯誤（無網路、尚無 release、簽章等）都只回報事件、不影響主流程。
 
@@ -45,6 +53,7 @@ let retryTimer = null;
 let attempts = 0;
 let offeredVersion = '';
 let lastPercent = 0;      // 最近一次回報的下載百分比（watchdog 寬限與診斷用）
+let lastFailReason = '';  // 最近一次下載失敗的實際原因（日誌與 stalled 事件用）
 let logFile = '';         // userData/logs/updater.log；取不到路徑就只進 console
 
 // 輕量檔案日誌：封裝後 stderr 無處可看，故把更新流程寫進固定檔案，方便事後查停滯主因。
@@ -67,7 +76,10 @@ function armWatchdog(graceMs) {
   const grace = graceMs != null
     ? graceMs
     : (lastPercent >= NEAR_DONE_PERCENT ? NEAR_DONE_GRACE_MS : STALL_MS);
-  watchdog = setTimeout(onDownloadStalled, grace);
+  watchdog = setTimeout(
+    () => onDownloadFailed(`stalled: no progress for ${Math.round(grace / 1000)}s at ${lastPercent}%`),
+    grace
+  );
 }
 
 function startDownload() {
@@ -81,16 +93,19 @@ function startDownload() {
 }
 
 // 停滯或下載錯誤：取消本次下載，未達上限就排程重試，否則送 'stalled' 讓使用者走瀏覽器退路。
-function onDownloadStalled() {
+// reason 是實際失敗原因（watchdog 停滯敘述或 error 事件訊息），隨最終事件送出並寫入日誌，
+// 供事後在 updater.log／回報訊息中直接看到真因（如 404），避免再被推測性文案誤導。
+function onDownloadFailed(reason) {
   clearTimers();
-  ulog('warn', `download stalled at ${lastPercent}% (attempt ${attempts}/${MAX_ATTEMPTS})`);
+  lastFailReason = reason || `unknown (at ${lastPercent}%)`;
+  ulog('warn', `download failed (attempt ${attempts}/${MAX_ATTEMPTS}): ${lastFailReason}`);
   try { if (cancelToken) cancelToken.cancel(); } catch (_) { /* 已結束的權杖：忽略 */ }
   cancelToken = null;
   if (attempts < MAX_ATTEMPTS) {
     retryTimer = setTimeout(startDownload, RETRY_DELAY_MS);
   } else {
-    ulog('error', `giving up after ${MAX_ATTEMPTS} attempts; offering browser download`);
-    sendRef('app:update', { state: 'stalled', version: offeredVersion });
+    ulog('error', `giving up after ${MAX_ATTEMPTS} attempts (${lastFailReason}); offering browser download`);
+    sendRef('app:update', { state: 'stalled', version: offeredVersion, reason: lastFailReason });
   }
 }
 
@@ -157,7 +172,7 @@ function init(app, send) {
     if (/cancel/i.test(msg)) return; // watchdog 主動取消產生的錯誤：內部行為，不外漏
     ulog('error', `error event: ${msg}`);
     if (cancelToken) {
-      onDownloadStalled(); // 下載階段的真錯誤（含 sha512 不符）：與停滯同路徑（重試→stalled）
+      onDownloadFailed(msg); // 下載階段的真錯誤（含 404/sha512 不符）：與停滯同路徑（重試→stalled）
       return;
     }
     send('app:update', { state: 'error', message: msg }); // 檢查階段錯誤（無網路/尚無 release）：靜默記錄

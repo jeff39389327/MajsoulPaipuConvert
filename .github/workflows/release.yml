@@ -117,6 +117,16 @@ jobs:
           # auto-update 元資料：electron-builder 產生的 latest.yml 必須隨安裝檔一起發佈，
           # electron-updater 才能抓到 {releaseUrl}/latest.yml 比對版本。
           if (-not (Test-Path dist_gui/latest.yml)) { Write-Error "dist_gui 內找不到 latest.yml（auto-update 必需）"; exit 1 }
+          # 發佈前的根因防線：GitHub 上傳 release 資產時，會把檔名裡「非 [A-Za-z0-9._-]」的字元
+          # （最典型是空格）改寫（空格→點），但 latest.yml 內仍是原檔名 → 用戶端下載 URL 一律 404。
+          # 0.1.27 就是這樣壞掉的。artifactName 已改成無空格的連字號檔名；此處在「刪除舊 release、
+          # 發佈新 release」等破壞性步驟之前先擋一次，確保未來若有人改壞 artifactName，是在 feed
+          # 上線前 CI 就失敗，而不是把壞掉的更新推給所有使用者。
+          if ($exe.Name -notmatch '^[A-Za-z0-9._-]+$') {
+            Write-Error "安裝檔名 '$($exe.Name)' 含 GitHub 會改寫的字元（如空格）；上傳後資產名將與 latest.yml 不符，auto-update 會 404。請修正 package.json 的 build.artifactName。"
+            exit 1
+          }
+          Write-Host "installer 檔名對 GitHub 資產命名安全: $($exe.Name)"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -159,3 +169,73 @@ jobs:
             dist_gui/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 發佈後的第二道防線（主防線是上面 Collect 的發佈前檔名檢查）：確認 latest.yml 宣告的每個
+      # 下載目標，在 release 上都有同名、同大小的資產。這裡驗證的是 electron-updater 真正會下載的
+      # files[].url（getFileList 只要 files 陣列存在就用它，top-level path 僅為空陣列時的後備），
+      # 而非只看 path——0.1.27 兩者剛好都壞，但正確的檢查必須對準實際下載欄位。此步另可抓到上傳
+      # 截斷（大小不符）與意料外的檔名改寫。API 剛發佈可能短暫看不到資產，故加重試。
+      - name: Verify update feed consistency
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 逐行解析 latest.yml：收集 files[] 內每個 (url, size)，並補上 top-level path 作為後備目標。
+          $lines = Get-Content dist_gui/latest.yml
+          $targets = @()
+          $inFiles = $false
+          $curUrl = $null
+          foreach ($line in $lines) {
+            if ($line -match '^files:\s*$') { $inFiles = $true; continue }
+            if ($inFiles -and $line -match '^\S') { $inFiles = $false }  # 遇到下一個 top-level key，files 區塊結束
+            if ($inFiles) {
+              if ($line -match '^\s*-\s*url:\s*(.+?)\s*$') { $curUrl = $Matches[1] }
+              elseif ($line -match '^\s*size:\s*(\d+)\s*$' -and $curUrl) {
+                $targets += [pscustomobject]@{ name = $curUrl; size = [int64]$Matches[1] }
+                $curUrl = $null
+              }
+            }
+          }
+          $ymlRaw = ($lines -join "`n")
+          if ($ymlRaw -match '(?m)^path:\s*(\S.*?)\s*$') {
+            $pathName = $Matches[1]
+            if (-not ($targets | Where-Object { $_.name -eq $pathName })) {
+              $targets += [pscustomobject]@{ name = $pathName; size = $null }  # size 未知就只驗存在
+            }
+          }
+          if ($targets.Count -eq 0) { Write-Error "latest.yml 解析不到任何下載目標（files[].url / path）"; exit 1 }
+          Write-Host ("latest.yml 下載目標: " + (($targets | ForEach-Object { "$($_.name)($($_.size))" }) -join ', '))
+
+          $headers = @{
+            'Authorization' = "Bearer $env:GH_TOKEN"
+            'Accept'        = 'application/vnd.github+json'
+            'User-Agent'    = 'gh-actions'
+          }
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/latest"
+          # 剛發佈時 API 可能短暫還看不到全部資產：重試最多 5 次、每次間隔 5 秒。
+          $assets = @()
+          for ($i = 1; $i -le 5; $i++) {
+            try { $rel = Invoke-RestMethod -Headers $headers -Uri $uri } catch { $rel = $null }
+            $assets = if ($rel -and $rel.assets) { @($rel.assets) } else { @() }
+            $names = @($assets | ForEach-Object { $_.name })
+            $missing = @($targets | Where-Object { $names -notcontains $_.name })
+            if ($assets.Count -gt 0 -and $missing.Count -eq 0) { break }
+            Write-Host "資產尚未完整可見（嘗試 $i/5），5 秒後重試…"
+            Start-Sleep -Seconds 5
+          }
+          Write-Host ("release 資產: " + ((@($assets | ForEach-Object { $_.name })) -join ', '))
+
+          $failed = $false
+          foreach ($t in $targets) {
+            $asset = $assets | Where-Object { $_.name -eq $t.name } | Select-Object -First 1
+            if ($null -eq $asset) {
+              Write-Host "::error::latest.yml 指向 '$($t.name)'，但 release 資產中不存在（GitHub 可能改寫了檔名，如空格→點）。用戶端 auto-update 會 404。"
+              $failed = $true
+            } elseif ($t.size -ne $null -and $asset.size -ne $t.size) {
+              Write-Host "::error::資產 '$($t.name)' 大小 $($asset.size) 與 latest.yml 宣告的 $($t.size) 不符（上傳不完整？）。"
+              $failed = $true
+            }
+          }
+          if ($failed) { Write-Error "update feed 一致性檢查失敗，見上方錯誤。"; exit 1 }
+          Write-Host "OK: 所有下載目標檔名與大小一致，auto-update 可正常下載。"
