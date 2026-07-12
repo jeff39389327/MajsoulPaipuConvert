@@ -16,7 +16,8 @@ tag 不影響。
 套用，使任何使用者只要在 config.env 填帳密即可運作 (毋需瀏覽器、毋需 token、毋需改 tensoul)。
 
 雀魂改版資源後若再現 151：設環境變數 MS_RES_VERSION (或 config.env 內同名)，或改下方
-_DEFAULT_RES_VERSION 即可。新值來源：瀏覽器登入雀魂後 localStorage 的 prev_res_version。
+_DEFAULT_RES_VERSION 即可。新值來源：瀏覽器登入雀魂後標題畫面右下角的版本號
+(如 v0.16.251.W.4.0.45 → 資源版本取 0.16.251)，或 localStorage 的 prev_res_version。
 """
 from __future__ import annotations
 
@@ -34,8 +35,8 @@ import ms.protocol_pb2 as pb  # 來自 ms-api，與 tensoul 套件無關
 # 只有 resource version 會被 151 檢查，故僅此一項開放覆寫；其餘為 CN 固定值
 # (專案 CLAUDE.md 已限定 CN-only)。MS_RES_VERSION 於登入時才讀取，使 config.env
 # 的覆寫生效 (模組 import 早於 dotenv.load_dotenv)。
-_DEFAULT_RES_VERSION = "0.16.232"
-_PKG_VERSION = "4.0.44"          # 伺服器不檢查，僅為與真實客戶端一致
+_DEFAULT_RES_VERSION = "0.16.251"
+_PKG_VERSION = "4.0.45"          # 伺服器不檢查，僅為與真實客戶端一致
 _LOGIN_TAG = "cn"                # CN-only
 _CONNECT_REGION = 1              # CN-only (config.json gateways 第 1 區)
 _USER_AGENT = (
@@ -174,21 +175,32 @@ def _parse_ver(v: str) -> list[int] | None:
         return None
 
 
-def res_version_candidates(current: str | None = None, span: int = 10) -> list[str]:
+def res_version_candidates(current: str | None = None, span: int = 60,
+                           minor_span: int = 15) -> list[str]:
     """產生 error 151 復原時要嘗試的資源版本候選（去重、依優先序）。
 
-    雀魂改版通常只升 patch（如 0.16.230 → 0.16.232），故優先以目前版本的 patch
-    +1..+span 探測，能在未更新很久後自癒；其後接 version.json 抓到的版本（CN web 多半
-    仍回舊 Laya 版會被自然濾掉），最後墊上內建預設值。
+    雀魂 patch 號會跳號（實測 2026-06 的 0.16.232 一個月後即 0.16.251，+19），舊的
+    span=10 探測不到就整批失敗，故 patch 探測放寬到 +span（預設 60，約數月的改版量）；
+    其後補上 minor 換代候選（0.{m+1}.0..minor_span、0.{m+2}.0..minor_span//2，涵蓋
+    minor 進位後 patch 重新起算的情境），再接 version.json 抓到的版本（CN web 仍回舊
+    Laya 版會被自然濾掉），最後墊上內建預設值。
 
     注意：fetch_latest_res_version 取自舊 Laya /1/version.json，回的版本（0.11.x）比現行
-    Unity WebGL 資源版本（0.16.x）舊，單靠它無法復原——patch 遞增探測才是主要手段。"""
+    Unity WebGL 資源版本（0.16.x）舊，單靠它無法復原——遞增探測才是主要手段。實測
+    伺服器對不存在的帳號回 1002 而非 151（帳號檢查先於版本檢查，無法用假帳號探測）；
+    探測皆以正確帳密進行，不會累積密碼錯誤。另實測伺服器接受的是「最低可接受版本」
+    以上的區間（如最新 0.16.251 時 0.16.250 也可登入），探測會停在第一個被接受的版本。
+    探測全滅時，正確版本可從瀏覽器登入雀魂後標題畫面右下角讀得（如 v0.16.251.W…，
+    取 0.16.251），或 localStorage 的 prev_res_version。"""
     current = current or _res_version()
     out: list[str] = []
     base = _parse_ver(current)
     if base and len(base) >= 3:
         for inc in range(1, span + 1):
             out.append(".".join(str(n) for n in (base[:2] + [base[2] + inc] + base[3:])))
+        for minor_inc, patches in ((1, minor_span), (2, minor_span // 2)):
+            for patch in range(patches + 1):
+                out.append(".".join(str(n) for n in ([base[0], base[1] + minor_inc, patch] + base[3:])))
     fetched = fetch_latest_res_version()
     if fetched:
         out.append(fetched)

@@ -170,7 +170,7 @@
   "update.browserDownload": "Download in browser instead",
 
   "error.LOGIN_FAILED": "Mahjong Soul login failed; check credentials (or error 151 needs a new resource version)",
-  "error.VERSION_UPDATE_FAILED": "Auto-updated the resource version but login still failed (error 151); set MS_RES_VERSION manually in Settings",
+  "error.VERSION_UPDATE_FAILED": "Every auto-probed resource version was rejected (error 151). Log into Mahjong Soul in a browser, read the version at the bottom-right of the title screen (e.g. v0.16.251.W… → 0.16.251), enter it as the Resource version in Settings, then retry",
   "error.ALL_ACCOUNTS_FAILED": "All accounts (including the backup pool) failed to log in; progress was saved to the checkpoint file — check the accounts and run again",
   "error.NO_ACCOUNT": "No Mahjong Soul account configured; fill in the credentials on the Settings page first",
   "error.NO_INPUT_LIST": "Game ID list not found or empty; crawl first or pick a txt file on the download page",

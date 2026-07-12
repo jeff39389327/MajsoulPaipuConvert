@@ -170,7 +170,7 @@
   "update.browserDownload": "改用瀏覽器下載",
 
   "error.LOGIN_FAILED": "雀魂登入失敗，請確認帳號密碼（或 error 151 需更新資源版本）",
-  "error.VERSION_UPDATE_FAILED": "已自動更新資源版本但仍登入失敗（error 151），請至設定手動填入 MS_RES_VERSION",
+  "error.VERSION_UPDATE_FAILED": "自動探測資源版本全數被拒（error 151）。請用瀏覽器登入雀魂，將標題畫面右下角的版本號（如 v0.16.251.W… 取 0.16.251）填入設定的「資源版本（進階）」後重試",
   "error.ALL_ACCOUNTS_FAILED": "所有帳號（含備用帳號池）皆無法登入；進度已記錄於斷點檔，請檢查帳號後重新執行",
   "error.NO_ACCOUNT": "尚未設定雀魂帳號，請先到設定頁填入帳號密碼",
   "error.NO_INPUT_LIST": "找不到牌譜 ID 清單或清單為空，請先爬取或於下載頁指定 txt 檔",

@@ -80,6 +80,9 @@ class AccountSession:
         self._index = 0
         self._generation = 0
         self._dead: set[int] = set()  # 本次執行中登入失敗的帳號（不再嘗試）
+        # 151 版本探測結果為全域事實（版本檢查與帳號無關），跨帳號共用已被拒集合，
+        # 避免號池中每個帳號都重跑整輪（可達數十次）的候選探測。
+        self._rejected_versions: set[str] = set()
         self._lock = asyncio.Lock()
         # 復原柵欄：重建連線（close→重連→重登）期間 clear，其他並發 worker 須等
         # set 後才可發請求。否則會打中半建構的 channel（_ws=None → 'NoneType' has no
@@ -180,14 +183,24 @@ class AccountSession:
 
         self._notify("VERSION_AUTO_UPDATING")
 
-        # 以「第一次登入實際使用的版本」為已試集合，避免重試同一個剛失敗的版本。
-        # 候選由 ms_patch 產生：目前版本的 patch 遞增探測（雀魂多半只升 patch）→ version.json
-        # → 內建預設，能在未更新很久後自癒。
-        tried = {ms_patch._res_version()}
+        # 以「第一次登入實際使用的版本」＋跨帳號共用的已拒集合為已試集合，避免重試
+        # 剛失敗或其他帳號已探測過的版本。候選由 ms_patch 產生：目前版本的 patch 遞增
+        # 探測（雀魂 patch 會跳號，span 已放寬）→ minor 換代候選 → version.json → 內建預設。
+        original = os.environ.get("MS_RES_VERSION")
+
+        def _restore_env() -> None:
+            # 失敗收尾還原環境變數，避免下一輪以「最後一個亂猜的候選」為基準再往上漂；
+            # 成功時不還原（新版本就是要留用並寫回 config.ini）。
+            if original is None:
+                os.environ.pop("MS_RES_VERSION", None)
+            else:
+                os.environ["MS_RES_VERSION"] = original
+
+        rejected = self._rejected_versions
+        rejected.add(ms_patch._res_version())
         for ver in ms_patch.res_version_candidates():
-            if not ver or ver in tried:
+            if not ver or ver in rejected:
                 continue
-            tried.add(ver)
             # _res_version() 於登入時才讀環境變數，直接改 os.environ 即時生效。
             os.environ["MS_RES_VERSION"] = ver
             try:
@@ -196,11 +209,15 @@ class AccountSession:
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if ms_patch.is_resource_version_error(exc):
+                    rejected.add(ver)
+                    await asyncio.sleep(0.25)  # 對伺服器溫和些，探測不必打滿速
                     continue  # 此版本仍被拒，試下一個候選
+                _restore_env()
                 raise
             self._persist_res_version(ver)
             self._notify("VERSION_UPDATED", ver)
             return
+        _restore_env()  # 探測全滅
         raise last_exc
 
     def _persist_res_version(self, version: str) -> None:

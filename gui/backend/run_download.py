@@ -149,9 +149,13 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
             await session.ensure_login()
         except download_recovery.AllAccountsFailed as exc:
             checkpoint.set_pending(unique_ids)
-            bridge.error("download",
-                         "LOGIN_FAILED" if len(accounts) == 1 else "ALL_ACCOUNTS_FAILED",
-                         str(exc), fatal=True)
+            # 最終仍是 error 151 → 自動探測全滅，改用帶「如何手動查版本」指引的錯誤碼，
+            # 而非誤導使用者去檢查帳密。
+            if ms_patch.is_resource_version_error(exc):
+                code = "VERSION_UPDATE_FAILED"
+            else:
+                code = "LOGIN_FAILED" if len(accounts) == 1 else "ALL_ACCOUNTS_FAILED"
+            bridge.error("download", code, str(exc), fatal=True)
             bridge.done(ok=False, exit_code=1)
             return
 
