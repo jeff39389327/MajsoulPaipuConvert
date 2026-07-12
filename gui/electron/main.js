@@ -223,9 +223,10 @@ function registerIpc() {
     };
   });
 
-  // GUI 自動更新：手動「檢查更新」與「立即重啟安裝」。
+  // GUI 自動更新：手動「檢查更新」、「立即重啟安裝」與「取消自動重啟」。
   ipcMain.handle('update:check', () => updater.checkForUpdates());
   ipcMain.handle('update:quitAndInstall', () => updater.quitAndInstall());
+  ipcMain.handle('update:cancelAutoInstall', () => updater.cancelAutoInstall());
 
   ipcMain.handle('app:setSettings', (_e, patch) => {
     settings = Object.assign({}, settings, patch || {});
@@ -329,7 +330,8 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   // 打包版啟動後檢查更新；事件透過 send('app:update', …) 轉發給 renderer。dev 模式為 no-op。
-  updater.init(app, send);
+  // isBusy：下載完成後的靜默自動重啟安裝須避開後端任務進行中（等空檔再重啟）。
+  updater.init(app, send, { isBusy: () => pyRunner.isRunning() });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

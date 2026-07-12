@@ -355,9 +355,17 @@ async def main():
     print(f"Debug模式: {'啟用' if save_debug else '停用'}")
     print(f"保存原始JSON: {'啟用' if save_raw_json else '停用'}")
 
-    # 讀取牌譜 ID（保序去除清單內重複）
-    with open('tonpuulist.txt', 'r', encoding='UTF-8') as f:
-        ids = list(dict.fromkeys(line.strip() for line in f if line.strip()))
+    # 讀取牌譜 ID（保序去除清單內重複；缺檔視為空清單——斷點可能仍有待續跑項）
+    try:
+        with open('tonpuulist.txt', 'r', encoding='UTF-8') as f:
+            ids = list(dict.fromkeys(line.strip() for line in f if line.strip()))
+    except FileNotFoundError:
+        ids = []
+
+    # 斷點檔先載入並把 pending/failed 併回工作清單——清單被覆蓋/換檔時上次中止的
+    # 項目才不會默默消失（斷點才算真的有讀）。
+    checkpoint = download_recovery.Checkpoint("download_checkpoint.json").load()
+    ids = download_recovery.merge_checkpoint_ids(ids, checkpoint)
 
     # 檢查已存在的檔案
     tenhou_existing = set()
@@ -379,15 +387,15 @@ async def main():
     with open(temp_file, 'w', encoding='UTF-8') as f:
         f.write('\n'.join(unique_ids))
 
-    # 帳號池（主帳號＋config.ini [account] account_pool）與斷點檔
+    # 帳號池（主帳號＋config.ini [account] account_pool）
     accounts = download_recovery.load_accounts({"username": username, "password": password})
     if not accounts:
         print("錯誤：尚未設定雀魂帳號（config.ini [account]）")
         return
-    checkpoint = download_recovery.Checkpoint("download_checkpoint.json").load()
-    retrying = [u for u in unique_ids if u in checkpoint.failed]
+    resume_set = set(checkpoint.failed) | set(checkpoint.pending)
+    retrying = [u for u in unique_ids if u in resume_set]
     if retrying:
-        print(f"偵測到上次失敗的 {len(retrying)} 筆，將自動重試")
+        print(f"偵測到上次失敗/中止的 {len(retrying)} 筆，將自動續跑")
     ini_paths = [p for p in (config_store.default_path(),) if os.path.exists(p)]
     max_attempts = 3 if len(accounts) > 1 else 2
 

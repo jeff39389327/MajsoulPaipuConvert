@@ -136,7 +136,11 @@ function humanBytes(n) {
 function setupUpdater() {
   if (!window.api.onUpdate) return;
   const banner = ensureUpdateBanner();
-  const show = (html) => { banner.innerHTML = html; banner.hidden = false; };
+  let countdownTimer = null; // 自動重啟倒數的顯示計時器（重繪橫幅前務必清掉，避免殘留）
+  const clearCountdown = () => {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  };
+  const show = (html) => { clearCountdown(); banner.innerHTML = html; banner.hidden = false; };
   // 在橫幅文字後附上「改用瀏覽器下載」連結（in-app 下載卡住時的退路）。
   const withBrowserLink = (html) => {
     show(`<span>${html}</span>`);
@@ -165,24 +169,52 @@ function setupUpdater() {
       // 明確請使用者改走瀏覽器。文案保持通用，別斷言失敗原因。
       withBrowserLink(t('update.stalled', { version: ev.version || '' }));
     } else if (ev.state === 'downloaded') {
+      // auto 欄位（主程序的靜默自動安裝排程）：
+      //   'restarting' = 空檔倒數中，delaySec 秒後自動重啟安裝（此處僅顯示倒數，安裝由主程序觸發）
+      //   'deferred'   = 後端任務進行中，任務結束後自動重啟
+      //   'cancelled'/缺 = 手動模式（立即重啟 / 稍後）
+      clearCountdown();
       banner.innerHTML = '';
-      banner.append(
-        Object.assign(document.createElement('span'), {
-          textContent: t('update.downloaded', { version: ev.version || '' }),
-        })
-      );
+      const text = document.createElement('span');
+      const v = ev.version || '';
+      if (ev.auto === 'restarting') {
+        let sec = Number(ev.delaySec) || 5;
+        text.textContent = t('update.autoRestart', { version: v, seconds: sec });
+        countdownTimer = setInterval(() => {
+          sec -= 1;
+          if (sec <= 0) { clearCountdown(); return; }
+          text.textContent = t('update.autoRestart', { version: v, seconds: sec });
+        }, 1000);
+      } else if (ev.auto === 'deferred') {
+        text.textContent = t('update.autoDeferred', { version: v });
+      } else {
+        text.textContent = t('update.downloaded', { version: v });
+      }
+      banner.append(text);
       const btn = document.createElement('button');
       btn.className = 'primary';
       btn.textContent = t('update.restart');
       btn.onclick = () => window.api.quitAndInstall();
-      const dismiss = document.createElement('button');
-      dismiss.className = 'ghost';
-      dismiss.textContent = t('update.later');
-      dismiss.onclick = () => { banner.hidden = true; };
-      banner.append(btn, dismiss);
+      banner.append(btn);
+      if (ev.auto === 'restarting' || ev.auto === 'deferred') {
+        const cancel = document.createElement('button');
+        cancel.className = 'ghost';
+        cancel.textContent = t('update.cancelAuto');
+        cancel.onclick = () => {
+          if (window.api.cancelAutoInstall) window.api.cancelAutoInstall();
+        };
+        banner.append(cancel);
+      } else {
+        const dismiss = document.createElement('button');
+        dismiss.className = 'ghost';
+        dismiss.textContent = t('update.later');
+        dismiss.onclick = () => { banner.hidden = true; };
+        banner.append(dismiss);
+      }
       banner.hidden = false;
     } else {
       // checking / none / error：不打擾使用者，靜默（錯誤已寫入 stderr log）。
+      clearCountdown();
       banner.hidden = true;
     }
   });

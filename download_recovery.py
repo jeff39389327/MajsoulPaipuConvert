@@ -13,7 +13,8 @@
 
 2. ``Checkpoint``：``download_checkpoint.json`` 斷點檔。成功的牌譜本來就以
    ``mahjong_logs/tenhou/`` 既有檔案去重（天然斷點），本檔補上「哪些失敗、為什麼、
-   中止時還剩哪些」的持久記錄；下次執行會自動重試失敗項，全部成功時自動刪除。
+   中止時還剩哪些」的持久記錄；下次執行以 ``merge_checkpoint_ids`` 把 pending／failed
+   併回工作清單自動續跑（即使 ID 清單已被重爬覆蓋或換檔），全部成功時自動刪除。
 
 3. ``download_with_retry``：單一牌譜的下載重試外殼，串起上述兩者的重試節奏。
 
@@ -294,6 +295,16 @@ class Checkpoint:
             os.remove(self.path)
         except OSError:
             pass
+
+
+def merge_checkpoint_ids(ids, checkpoint: Checkpoint) -> list:
+    """把斷點檔的 pending（上次中止未處理）與 failed（上次失敗）併回本次工作清單
+    （保序去重：清單在前、斷點項在後）。
+
+    這是斷點真正被「讀取來驅動續跑」的地方——在此之前 pending 只寫不讀，一旦 ID
+    清單被重爬覆蓋或換檔，上次中止剩下的項目就默默消失。合併後交給呼叫端既有的
+    「tenhou/ 已存在檔案」過濾去掉已完成項。"""
+    return list(dict.fromkeys(list(ids) + list(checkpoint.pending) + list(checkpoint.failed)))
 
 
 async def download_with_retry(session: AccountSession, download_fn, uuid: str,

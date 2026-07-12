@@ -109,6 +109,11 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
         return
 
     ids, input_path = _read_id_list(params, work_dir)
+    # 斷點檔：記錄失敗項與中止時的未處理清單。先載入並把 pending/failed 併回工作
+    # 清單——清單被重爬覆蓋或換檔時，上次中止的項目才不會默默消失（斷點才算真的有讀）。
+    checkpoint = download_recovery.Checkpoint(
+        os.path.join(work_dir, "download_checkpoint.json")).load()
+    ids = download_recovery.merge_checkpoint_ids(ids, checkpoint)
     if not ids:
         bridge.error("download", "NO_INPUT_LIST", input_path, fatal=True)
         bridge.done(ok=False, exit_code=1)
@@ -116,10 +121,8 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
     unique_ids = _filter_existing(ids, base_dir)
     total = len(unique_ids)
 
-    # 斷點檔：記錄失敗項與中止時的未處理清單；上次失敗項此次自動重試。
-    checkpoint = download_recovery.Checkpoint(
-        os.path.join(work_dir, "download_checkpoint.json")).load()
-    retrying = [u for u in unique_ids if u in checkpoint.failed]
+    resume_set = set(checkpoint.failed) | set(checkpoint.pending)
+    retrying = [u for u in unique_ids if u in resume_set]
 
     bridge.stage_start("download", total=total, collect_timing=collect_timing,
                        convert_concurrency=convert_concurrency,

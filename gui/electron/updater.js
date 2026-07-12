@@ -29,6 +29,11 @@
 // CI 發佈後另有一步驗證兩者相符。watchdog 保留，作為 CDN 真悶死時的防護。
 // 教訓：最終失敗請帶上實際原因（見 stalled 事件的 reason），別再寫死推測性文案。
 //
+// 靜默自動安裝（2026-07）：先前下載完成後只顯示「立即重啟」按鈕＋autoInstallOnAppQuit，
+// 使用者不點也不關應用就永遠不會更新。改為：下載完成→（後端任務進行中先輪詢等空檔）→
+// 倒數數秒自動 quitAndInstall(isSilent=true, isForceRunAfter=true)——NSIS /S 靜默安裝、
+// 裝完自動重開。倒數/等待期間可取消（退回手動模式；下次離開仍會安裝）。
+//
 // 安全：僅在「已打包」時啟用；dev 模式呼叫 autoUpdater 會丟 "update config not found"，故直接 no-op。
 // 任何更新錯誤（無網路、尚無 release、簽章等）都只回報事件、不影響主流程。
 
@@ -45,8 +50,13 @@ const NEAR_DONE_GRACE_MS = 180_000;
 const NEAR_DONE_PERCENT = 90;     // 達此百分比後改用長寬限
 const MAX_ATTEMPTS = 3;           // 自動重試上限（含第一次）
 const RETRY_DELAY_MS = 3_000;     // 重試間隔
+// 靜默自動安裝：下載完成後不等使用者手動關閉——空檔時倒數幾秒即自動重啟安裝
+// （NSIS /S 靜默 + 裝完自動開啟）；後端任務進行中則輪詢等它結束，避免砍掉下載中的批次。
+const AUTO_INSTALL_DELAY_MS = 5_000;   // 空檔時的倒數提示時間
+const BUSY_POLL_MS = 10_000;           // 任務進行中多久再檢查一次
 
 let sendRef = () => {};
+let isBusyRef = () => false;  // 由 main 傳入：後端 job 是否進行中（見 init opts.isBusy）
 let cancelToken = null;   // 進行中下載的取消權杖（null = 無下載進行中）
 let watchdog = null;
 let retryTimer = null;
@@ -55,6 +65,10 @@ let offeredVersion = '';
 let lastPercent = 0;      // 最近一次回報的下載百分比（watchdog 寬限與診斷用）
 let lastFailReason = '';  // 最近一次下載失敗的實際原因（日誌與 stalled 事件用）
 let logFile = '';         // userData/logs/updater.log；取不到路徑就只進 console
+let autoTimer = null;         // 自動安裝的倒數/輪詢計時器
+let autoCancelled = false;    // 使用者按「取消自動重啟」→ 回到手動模式（下次離開仍會安裝）
+let autoDeferredSent = false; // deferred 狀態只送一次，避免輪詢期間每 10 秒重刷橫幅
+let downloadedVersion = '';   // 已下載完成、待安裝的版本
 
 // 輕量檔案日誌：封裝後 stderr 無處可看，故把更新流程寫進固定檔案，方便事後查停滯主因。
 function ulog(level, msg) {
@@ -68,6 +82,53 @@ function ulog(level, msg) {
 function clearTimers() {
   if (watchdog) { clearTimeout(watchdog); watchdog = null; }
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+}
+
+function clearAutoTimer() {
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+}
+
+// 下載完成後的靜默自動安裝排程：
+//   忙碌（後端 job 進行中）→ 送 auto:'deferred' 讓橫幅說明「任務完成後自動重啟」，輪詢等空檔；
+//   空檔 → 送 auto:'restarting'（含倒數秒數）給橫幅顯示，倒數完 quitAndInstall(靜默+自動開啟)。
+// 倒數到期時再驗一次忙碌（期間可能剛好開新任務），忙碌就回到等待。
+function scheduleAutoInstall() {
+  if (autoCancelled) return;
+  clearAutoTimer();
+  let busy = false;
+  try { busy = !!isBusyRef(); } catch (_) { busy = false; }
+  if (busy) {
+    if (!autoDeferredSent) {
+      autoDeferredSent = true;
+      ulog('info', `auto install deferred: job running (${downloadedVersion})`);
+      sendRef('app:update', { state: 'downloaded', version: downloadedVersion, auto: 'deferred' });
+    }
+    autoTimer = setTimeout(scheduleAutoInstall, BUSY_POLL_MS);
+    return;
+  }
+  autoDeferredSent = false;
+  sendRef('app:update', {
+    state: 'downloaded',
+    version: downloadedVersion,
+    auto: 'restarting',
+    delaySec: Math.round(AUTO_INSTALL_DELAY_MS / 1000),
+  });
+  autoTimer = setTimeout(() => {
+    let stillBusy = false;
+    try { stillBusy = !!isBusyRef(); } catch (_) { stillBusy = false; }
+    if (stillBusy) { scheduleAutoInstall(); return; }
+    ulog('info', `auto quitAndInstall ${downloadedVersion} (silent, force run after)`);
+    quitAndInstall();
+  }, AUTO_INSTALL_DELAY_MS);
+}
+
+// 「取消自動重啟」：停掉排程、橫幅退回手動的「立即重啟」模式。
+// autoInstallOnAppQuit 仍為 true，使用者下次自行關閉應用時照樣會安裝。
+function cancelAutoInstall() {
+  autoCancelled = true;
+  clearAutoTimer();
+  ulog('info', 'auto install cancelled by user');
+  sendRef('app:update', { state: 'downloaded', version: downloadedVersion, auto: 'cancelled' });
 }
 
 // grace 未指定時依進度決定：接近完成給長寬限（重來代價=整包），其餘用 STALL_MS。
@@ -111,11 +172,12 @@ function onDownloadFailed(reason) {
 
 // 把更新狀態統一成一個事件送往 renderer：{ state, ... }
 //   checking | available | none | progress | downloaded | stalled | error
-function init(app, send) {
+function init(app, send, opts) {
   if (!app.isPackaged) return; // dev：無更新設定，避免拋錯
   if (wired) return;
   wired = true;
   sendRef = send;
+  isBusyRef = (opts && opts.isBusy) || (() => false);
 
   // 更新日誌檔（封裝後無 stderr 可看）：userData/logs/updater.log。
   try {
@@ -165,7 +227,11 @@ function init(app, send) {
     cancelToken = null;
     const v = (info && info.version) || offeredVersion;
     ulog('info', `update-downloaded: ${v}`);
-    send('app:update', { state: 'downloaded', version: v });
+    // 靜默自動安裝：不再停在「等使用者手動重啟」——空檔倒數後自動關閉→安裝→重開。
+    downloadedVersion = v;
+    autoCancelled = false;
+    autoDeferredSent = false;
+    scheduleAutoInstall();
   });
   autoUpdater.on('error', (err) => {
     const msg = err == null ? 'unknown' : String(err.message || err);
@@ -193,13 +259,15 @@ function checkForUpdates() {
   }
 }
 
-// 由 renderer 的「立即重啟並更新」觸發。isSilent=false 顯示安裝程式進度、isForceRunAfter=true 安裝後自動開啟。
+// 自動排程到期或 renderer 的「立即重啟並更新」觸發。
+// isSilent=true：NSIS 以 /S 靜默安裝（不彈安裝精靈）；isForceRunAfter=true：裝完自動開啟。
 function quitAndInstall() {
+  clearAutoTimer();
   try {
-    autoUpdater.quitAndInstall(false, true);
-  } catch (_) {
-    /* 尚未下載完成等情況：忽略 */
+    autoUpdater.quitAndInstall(true, true);
+  } catch (e) {
+    ulog('error', `quitAndInstall failed: ${String((e && e.message) || e)}`);
   }
 }
 
-module.exports = { init, checkForUpdates, quitAndInstall };
+module.exports = { init, checkForUpdates, quitAndInstall, cancelAutoInstall };

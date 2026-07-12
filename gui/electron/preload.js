@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   // GUI 自動更新
   checkUpdate: () => ipcRenderer.invoke('update:check'),
   quitAndInstall: () => ipcRenderer.invoke('update:quitAndInstall'),
+  cancelAutoInstall: () => ipcRenderer.invoke('update:cancelAutoInstall'),
   onUpdate: (cb) => {
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on('app:update', fn);
