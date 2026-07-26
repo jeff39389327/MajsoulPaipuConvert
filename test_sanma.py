@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """下載一張三麻譜，檢視直出 mjai 並對照 mortal-sanma libriichi3p 的 schema 嚴格驗證。"""
 import asyncio, json, os, sys
+# 牌譜玩家名多為簡體/日文，Windows 主控台預設 Big5(cp950) 會在 print 時 UnicodeEncodeError
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.append("tensoul-py-ng")
 import ms_patch
 ms_patch.ensure_ms_cfg()

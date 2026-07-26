@@ -8,16 +8,23 @@ tensoul-py-ng vendored 修改)。
 tensoul-py-ng 久未更新：登入/下載送的 client_version_string 仍是舊格式
 "web-{version}" (取自已棄用的 /1/version.json，回 0.11.252.w)。現行雀魂客戶端
 已換成 Unity WebGL，伺服器登入/下載改檢查 **resource version**，舊請求一律回
-error 151。實測 151 只看 resource version (client_version_string)，package / UA /
+error 151。2026-06 實測：151 只看 resource version (client_version_string)，package / UA /
 tag 不影響。
+
+**2026-07 起 151 有第二個來源：連線握手** (見 `patch_route_connect`)。雀魂把客戶端合法性
+檢查前移到 `.lq.Route.requestConnection`，該請求要帶 ms-api protobuf 沒有的第 6 欄 "Web"；
+少了它，之後不論送什麼 resource version 都回 151 (連不存在的帳號也是 151)。兩個來源要一起
+修才會通。
 
 由於 `tensoul-py-ng/` 在 .gitignore 內 (每位使用者各自 clone)，補丁不能只改 vendored
 檔，否則別人重新 clone 又會 151。本模組把修正放在**被追蹤的 repo 程式碼**，於 runtime
 套用，使任何使用者只要在 config.env 填帳密即可運作 (毋需瀏覽器、毋需 token、毋需改 tensoul)。
 
 雀魂改版資源後若再現 151：設環境變數 MS_RES_VERSION (或 config.env 內同名)，或改下方
-_DEFAULT_RES_VERSION 即可。新值來源：瀏覽器登入雀魂後標題畫面右下角的版本號
-(如 v0.16.251.W.4.0.45 → 資源版本取 0.16.251)，或 localStorage 的 prev_res_version。
+_DEFAULT_RES_VERSION 即可 (`download_recovery` 亦會自動探測並寫回 config.ini)。新值來源：
+開啟 https://game.maj-soul.com/1/ 後標題畫面右下角的版本號 (如 v0.16.257.W.4.0.45 → 取
+0.16.257，**免登入**)，或 localStorage 的 prev_res_version。若連正確版本都 151，代表又是
+握手/請求格式被改：用瀏覽器攔 WebSocket (hook window.WebSocket 錄 frame) 比對真實封包。
 """
 from __future__ import annotations
 
@@ -26,6 +33,7 @@ import hmac
 import importlib.util
 import json
 import os
+import time
 import types
 import urllib.request
 import uuid
@@ -35,7 +43,7 @@ import ms.protocol_pb2 as pb  # 來自 ms-api，與 tensoul 套件無關
 # 只有 resource version 會被 151 檢查，故僅此一項開放覆寫；其餘為 CN 固定值
 # (專案 CLAUDE.md 已限定 CN-only)。MS_RES_VERSION 於登入時才讀取，使 config.env
 # 的覆寫生效 (模組 import 早於 dotenv.load_dotenv)。
-_DEFAULT_RES_VERSION = "0.16.251"
+_DEFAULT_RES_VERSION = "0.16.257"   # 2026-07-26 實機標題畫面 v0.16.257.W.4.0.45
 _PKG_VERSION = "4.0.45"          # 伺服器不檢查，僅為與真實客戶端一致
 _LOGIN_TAG = "cn"                # CN-only
 _CONNECT_REGION = 1              # CN-only (config.json gateways 第 1 區)
@@ -84,21 +92,75 @@ def _tensoul_pkg_dir(tensoul_dir: str) -> str:
 
 def ensure_ms_cfg(tensoul_dir: str = "tensoul-py-ng") -> None:
     """tensoul 的 cfg.py 於 import 時即讀 ms_cfg.json，缺檔會 import 失敗。
-    若不存在則以 ms_cfg.example.json 為底建立並設成 CN。**必須在 import tensoul 之前呼叫。**"""
+    若不存在則以 ms_cfg.example.json 為底建立並設成 CN。**必須在 import tensoul 之前呼叫。**
+
+    建好設定檔後順手套用 `patch_route_connect()`（此時 import tensoul 已安全），
+    使所有入口點（toumajsoul / majsoul_get / GUI / 測試腳本）都自動拿到握手補丁。"""
     pkg_dir = _tensoul_pkg_dir(tensoul_dir)
     cfg_path = os.path.join(pkg_dir, "ms_cfg.json")
-    if os.path.exists(cfg_path):
+    if not os.path.exists(cfg_path):
+        example = os.path.join(pkg_dir, "ms_cfg.example.json")
+        if os.path.exists(example):
+            with open(example, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+        data["connect_region_number"] = _CONNECT_REGION  # tensoul 下載路徑唯一會讀的鍵
+        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    patch_route_connect()
+
+
+# ReqRequestConnection 的第 6 欄 (string) = 平台字串 "Web"。ms-api 的 protocol_pb2 沒有這欄
+# (只有 2:type / 3:route_id / 4:timestamp)，無法用欄位賦值，故以 protobuf wire format 直接
+# 附加：tag = (6 << 3) | 2 (length-delimited) = 0x32，長度 3，內容 "Web"。
+_CONN_PLATFORM_FIELD = b"\x32\x03Web"
+
+
+def patch_route_connect() -> None:
+    """替換 tensoul 的 route_connect，讓 ReqRequestConnection 帶上平台欄位 "Web"。
+
+    為什麼需要這支 (2026-07 實測)
+    -----------------------------
+    雀魂把「客戶端合法性」檢查從登入本體前移到**連線握手**：握手若少了第 6 欄 "Web"，
+    之後 ReqLogin 一律回 **error 151**——與 resource version 對不對無關，連不存在的帳號
+    也回 151 (2026-06 時回 1002)，因此舊的「遞增探測資源版本」永遠探不到出口。
+    實測 (res 0.16.257)：握手帶 "Web" → 登入成功；不帶 → 151。type (1/3) 與 timestamp
+    (秒/毫秒) 都不影響，但此處仍照真實 Unity 客戶端送 type=1 + 秒級 timestamp。
+
+    真實客戶端封包 (2026-07-26 於 game.maj-soul.com/1/ 攔 WebSocket 取得)：
+        .lq.Route.requestConnection {type: 1, route_id: "route-5", timestamp: 1785075645, 6: "Web"}
+
+    直接改 class method，故所有既有 instance 與後續重連 (AccountSession._reconnect →
+    downloader.start()) 都吃得到；重複呼叫為 no-op。"""
+    try:
+        from tensoul.downloader import MajsoulPaipuDownloader
+    except Exception:  # noqa: BLE001 tensoul 尚未可 import 時交由呼叫端稍後再套
         return
-    example = os.path.join(pkg_dir, "ms_cfg.example.json")
-    if os.path.exists(example):
-        with open(example, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = {}
-    data["connect_region_number"] = _CONNECT_REGION  # tensoul 下載路徑唯一會讀的鍵
-    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    if getattr(MajsoulPaipuDownloader.route_connect, "_ms_patched", False):
+        return
+
+    async def patched_route_connect(self, channel, route, route_id):
+        req = pb.ReqRequestConnection()
+        req.type = 1
+        req.route_id = route_id
+        req.timestamp = int(time.time())
+        await channel.connect(self.MS_HOST)
+        # 繞過 Route stub 直接送序列化位元組——stub 只吃 message 物件，塞不進 proto 沒有的欄位。
+        res = pb.ResRequestConnection()
+        res.ParseFromString(
+            await channel.send_request(
+                ".lq.Route.requestConnection", req.SerializeToString() + _CONN_PLATFORM_FIELD
+            )
+        )
+        if int(res.error.ByteSize()) > 0:
+            await channel.close()
+            raise RuntimeError("request connection for route {} failed: error {}".format(
+                route_id, res.error.code))
+
+    patched_route_connect._ms_patched = True
+    MajsoulPaipuDownloader.route_connect = patched_route_connect
 
 
 def build_login_req(account: str, password: str) -> pb.ReqLogin:
@@ -187,7 +249,9 @@ def res_version_candidates(current: str | None = None, span: int = 60,
 
     注意：fetch_latest_res_version 取自舊 Laya /1/version.json，回的版本（0.11.x）比現行
     Unity WebGL 資源版本（0.16.x）舊，單靠它無法復原——遞增探測才是主要手段。實測
-    伺服器對不存在的帳號回 1002 而非 151（帳號檢查先於版本檢查，無法用假帳號探測）；
+    伺服器對不存在的帳號回 1002 而非 151（帳號檢查先於版本檢查，無法用假帳號探測）——
+    這反過來是個好用的判斷：**假帳號若回 151 而不是 1002，就不是資源版本問題**，而是握手/
+    請求格式又被改（見 `patch_route_connect`），此時整輪探測必然全滅、只是白燒登入請求；
     探測皆以正確帳密進行，不會累積密碼錯誤。另實測伺服器接受的是「最低可接受版本」
     以上的區間（如最新 0.16.251 時 0.16.250 也可登入），探測會停在第一個被接受的版本。
     探測全滅時，正確版本可從瀏覽器登入雀魂後標題畫面右下角讀得（如 v0.16.251.W…，

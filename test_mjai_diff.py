@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """差分測試：比對 tensoul 直出 mjai vs mjai-reviewer 參考輸出（四麻）。"""
 import asyncio, gzip, json, os, sys
+# 牌譜玩家名多為簡體/日文，Windows 主控台預設 Big5(cp950) 會在 print 時 UnicodeEncodeError
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.append("tensoul-py-ng")
 import ms_patch
 ms_patch.ensure_ms_cfg()

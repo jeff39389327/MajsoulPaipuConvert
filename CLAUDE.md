@@ -139,8 +139,14 @@ conversion fans out in parallel (GUI `run_download.py` spawns background convert
 `download_with_retry` attempt) remain as defense-in-depth: a request sent during the reconnect
 window hits a half-built channel (`'NoneType' object has no attribute 'send'`) or a
 connected-but-not-yet-logged-in session (server error 1004). Majsoul error codes seen here:
-151 = resource version expired, 1004 = session not logged in (transient, retry), 1203 = record
-does not exist (permanent). Only when *every* account fails to log in does
+151 = client rejected, 1004 = session not logged in (transient, retry), 1203 = record
+does not exist (permanent). **151 has two distinct causes** — a stale resource version (auto-probed
+and written back to `config.ini`), *or* a handshake the server no longer accepts: since 2026-07 the
+`.lq.Route.requestConnection` must carry a platform field `"Web"` that the `ms` protobuf doesn't
+define, so `ms_patch.patch_route_connect()` appends it as a raw wire-format field (applied
+automatically by `ensure_ms_cfg()`). Quick triage: log in with a **nonexistent account** — 1002 means
+version-only (probing can fix it), 151 means the request/handshake format changed again and version
+probing is futile. Only when *every* account fails to log in does
 it raise `AllAccountsFailed` — the run aborts and `Checkpoint` (`download_checkpoint.json` in the
 work dir) records the failed map (`uuid → {error, account, ts}`) and the still-pending list. Failed
 uuids are retried automatically on the next run (they're not in the tenhou dir, so the normal dedupe
