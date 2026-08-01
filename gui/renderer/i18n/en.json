@@ -184,6 +184,7 @@
   "notice.ACCOUNT_SWITCHED": "Switched to account {user}",
   "notice.ACCOUNT_LOGIN_FAILED": "Account {user} failed to log in; trying the next one",
   "notice.RETRY_PREV_FAILED": "Detected {count} item(s) failed or interrupted last time; resuming automatically",
+  "notice.SLOW_SESSION": "Connection unusually slow (~{msg}s per log); switching gateway/account",
   "error.SCRAPY_FAILED": "The crawler process exited abnormally",
   "error.NO_PYTHON": "Python not found; set the Python path in settings",
   "error.SPAWN_FAILED": "Failed to start the backend process",

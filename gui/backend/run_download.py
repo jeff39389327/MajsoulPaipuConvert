@@ -250,6 +250,16 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
                 bridge.progress("download", phase="download", done=counters["dl"], total=total,
                                 uuid=uuid, ok=True, failed=counters["fail"],
                                 net_ms=net_ms, rate=rate)
+                # 連線異常緩慢（節點抽壞或帳號被限流）→ 重連換節點＋換下一個帳號。
+                slow = session.note_timing(net_ms / 1000)
+                if slow is not None:
+                    bridge.notice("download", "SLOW_SESSION", f"{slow:.1f}")
+                    try:
+                        await session.recover(session.generation, force_switch=True,
+                                              reason=f"連線異常緩慢（{slow:.1f}s/筆）")
+                    except download_recovery.AllAccountsFailed:
+                        state["aborted"] = True
+                        break
                 await slots.acquire()
                 task = asyncio.ensure_future(convert(uuid, res))
                 convert_tasks.add(task)

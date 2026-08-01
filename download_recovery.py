@@ -53,6 +53,18 @@ _SESSION_PATTERNS = (
 )
 # 連續失敗達此數量就強制重建一次連線（防「未知原因整批失敗」時我們毫無反應地空轉）。
 _RECOVER_AFTER_CONSECUTIVE = 20
+
+# ── 異常緩慢偵測 ──────────────────────────────────────────────────────────
+# 正常情況下 fetchGameRecord 約 0.4~0.6s/筆（實測台灣→CN）。實務上遇過整條 session
+# 慢到 10~20s/筆，成因有二，且都不會回錯誤、只是慢：
+#   (a) 節點抽壞：tensoul 的 _connect() 用 random.choice(routes) 隨機挑閘道，抽到爛的
+#       就整段連線都慢——重連會重抽，多半就好了。
+#   (b) 帳號被限流：同一個號長期大量拉牌譜後被降速，症狀是「越跑越慢」——換號才有用。
+# 兩者都靠同一招處理：連續數筆的中位數超標就 reconnect + 換下一個帳號（仍然一次只掛
+# 一個號）。門檻取得保守，避免把「牌譜比較大」或偶發抖動誤判成異常。
+_SLOW_WINDOW = 8         # 觀察最近幾筆
+_SLOW_THRESHOLD = 4.0    # 秒/筆；中位數超過即視為異常（正常值的 ~8 倍）
+_SLOW_COOLDOWN = 30      # 兩次切換至少相隔幾筆，避免在都很慢的環境反覆重連
 # 心跳間隔（秒）。真實客戶端約 5~6s 送一次 .lq.Lobby.heatbeat；長時間只讀不寫的
 # 會話會被伺服器判定離線，之後所有請求回 1004。
 _KEEPALIVE_INTERVAL = 6.0
@@ -145,6 +157,10 @@ class AccountSession:
         self._ready.set()
         self._consecutive_failures = 0
         self._keepalive_task = None
+        self._recent_times: list[float] = []   # 最近幾筆的下載耗時（異常緩慢偵測）
+        # 距離上次「因為慢而切換」已過幾筆。初值＝冷卻期，讓第一次偵測在視窗一滿
+        # （8 筆）就能觸發，不必先白跑 30 筆。
+        self._since_switch = _SLOW_COOLDOWN
 
     @property
     def generation(self) -> int:
@@ -179,6 +195,24 @@ class AccountSession:
         if permanent:
             return False
         return self._consecutive_failures % _RECOVER_AFTER_CONSECUTIVE == 0
+
+    def note_timing(self, seconds: float) -> float | None:
+        """記一筆下載耗時；若判定連線異常緩慢，回傳該中位數（呼叫端據此切換），否則 None。
+
+        用中位數而非平均：單筆特別大的牌譜或一次抖動不該觸發切換，但「整段都慢」會。"""
+        self._since_switch += 1
+        times = self._recent_times
+        times.append(seconds)
+        if len(times) > _SLOW_WINDOW:
+            del times[0]
+        if len(times) < _SLOW_WINDOW or self._since_switch < _SLOW_COOLDOWN:
+            return None
+        median = sorted(times)[len(times) // 2]
+        if median < _SLOW_THRESHOLD:
+            return None
+        times.clear()
+        self._since_switch = 0
+        return median
 
     def start_keepalive(self, interval: float = _KEEPALIVE_INTERVAL) -> None:
         """開始送心跳（.lq.Lobby.heatbeat），維持會話存活。
@@ -554,7 +588,7 @@ def merge_checkpoint_ids(ids, checkpoint: Checkpoint) -> list:
 
 async def download_with_retry(session: AccountSession, download_fn, uuid: str,
                               max_attempts: int = 3, base_delay: float = 1.0,
-                              timeout: float = 30.0):
+                              timeout: float = 45.0):
     """下載單一牌譜並在失敗時依錯誤性質決定復原強度：
 
     - **牌譜級（1203 牌譜不存在）**：伺服器的最終答案，直接放棄——不重試、不重連、

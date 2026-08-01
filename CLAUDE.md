@@ -148,7 +148,10 @@ session/connection error (151, 1004, dead websocket, timeout) reconnects and re-
 *same* account (which covers error 151 via the auto resource-version update), and only the next
 failure rotates to the next pool account; an unknown error retries once in place first. Safety net:
 `note_failure` forces one reconnect after `_RECOVER_AFTER_CONSECUTIVE` consecutive non-permanent
-failures. Login failures only mark an account dead when they are *auth* errors — otherwise one
+failures. **Slow-session detection** (`note_timing`): downloads that succeed but crawl (median of the
+last 8 ≥ 4 s/log vs the normal ~0.5 s) trigger a reconnect + account switch — a bad gateway
+(`_connect` picks `random.choice(routes)`, so reconnecting re-rolls it) and a rate-limited account
+look identical from here, and one mechanism covers both; a cooldown keeps it from thrashing. Login failures only mark an account dead when they are *auth* errors — otherwise one
 network blip would kill the whole pool. `AccountSession.start_keepalive()` sends `.lq.Lobby.heatbeat`
 every 6 s so long runs don't get the session dropped (stop it with `stop_keepalive` in a `finally`
 before the channel closes). **Downloads are strictly serial** — one

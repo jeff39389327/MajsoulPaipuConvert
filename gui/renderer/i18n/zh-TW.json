@@ -184,6 +184,7 @@
   "notice.ACCOUNT_SWITCHED": "已切換至帳號 {user}",
   "notice.ACCOUNT_LOGIN_FAILED": "帳號 {user} 登入失敗，改試下一個帳號",
   "notice.RETRY_PREV_FAILED": "偵測到上次失敗或中止的 {count} 筆，將自動續跑",
+  "notice.SLOW_SESSION": "連線異常緩慢（約 {msg} 秒/筆），自動改換節點／帳號",
   "error.SCRAPY_FAILED": "爬蟲程序非正常結束",
   "error.NO_PYTHON": "找不到 Python，請於設定指定 Python 路徑",
   "error.SPAWN_FAILED": "無法啟動後端程序",

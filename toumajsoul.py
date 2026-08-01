@@ -457,6 +457,7 @@ async def main():
             with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
                 for index, record_uuid in enumerate(unique_ids):
                     next_index = index
+                    t0 = time.perf_counter()
                     try:
                         res, _, _, err = await download_recovery.download_with_retry(
                             session, fetch_only, record_uuid, max_attempts=max_attempts)
@@ -469,6 +470,12 @@ async def main():
                         break
                     next_index = index + 1
                     if res is not None:
+                        # 連線異常緩慢（節點抽壞或帳號被限流）→ 重連換節點＋換下一個帳號。
+                        slow = session.note_timing(time.perf_counter() - t0)
+                        if slow is not None:
+                            print(f"[連線] 異常緩慢（{slow:.1f}s/筆），改換節點/帳號")
+                            await session.recover(session.generation, force_switch=True,
+                                                  reason=f"連線異常緩慢（{slow:.1f}s/筆）")
                         checkpoint.clear_failure(record_uuid)
                         await slots.acquire()
                         task = asyncio.ensure_future(
