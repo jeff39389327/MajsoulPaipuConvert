@@ -252,72 +252,72 @@ async def process_log(record_uuid, log_data, base_dir, raw_timing_data=None, ful
     except Exception as e:
         print(f"Error cleaning temp files for {record_uuid}: {str(e)}")
 
-    await asyncio.sleep(0.1)
+async def fetch_record(record_uuid, downloader):
+    """**只做網路那一段**：向雀魂取回單筆牌譜的原始回應。
 
-async def fetch_raw_timing_data(record_uuid, downloader):
-    """獲取原始思考時間數據和完整牌譜記錄"""
+    回傳 (res, error_msg)；失敗時 res 為 None。刻意不解析——解析是純 CPU（單筆約
+    70 ms，含 timing 更多），留給呼叫端丟到背景/執行緒，讓下載迴圈只被網路 RTT 限制。
+    """
     try:
         # PATCH: 舊 'web-{version}' 會回 error 151，改用可攜式補丁的共用 builder
-        req = ms_patch.build_game_record_req(record_uuid)
-
-        res = await downloader.lobby.fetch_game_record(req)
-        
+        res = await downloader.lobby.fetch_game_record(ms_patch.build_game_record_req(record_uuid))
         if res.error.code:
-            return None, None
-        
-        # 保存完整的原始響應（包含head和details_data）
-        full_record = {
-            'head': json_format.MessageToDict(res.head, preserving_proto_field_name=True) if res.head else None,
-            'data_url': res.data_url if res.data_url else None,
-        }
-        
-        # 解析詳細記錄
-        wrapper = pb.Wrapper()
-        wrapper.ParseFromString(res.data)
-        
-        details = pb.GameDetailRecords()
-        details.ParseFromString(wrapper.data)
-        
-        # 轉換為 JSON
-        details_json = json_format.MessageToDict(details, preserving_proto_field_name=True)
-        
-        # 合併到完整記錄中
-        full_record['details'] = details_json
-        
-        return details_json, full_record
-        
+            err = "error_code: %s" % res.error.code
+            print(f"下載牌譜 {record_uuid} 失敗: {err}")
+            return None, err
+        return res, None
     except Exception as e:
-        print(f"Warning: Failed to fetch timing data for {record_uuid}: {str(e)}")
-        return None, None
+        print(f"下載牌譜 {record_uuid} 失敗: {str(e)}")
+        return None, str(e)
+
+def parse_full_record(res):
+    """從**已下載的回應**解出 (details_json, full_record)——不再發第二次請求。
+
+    以前這裡是 fetch_raw_timing_data()：為了拿思考時間，對同一個 uuid 再打一次
+    fetch_game_record，等於每筆牌譜向雀魂下載兩次完整內容（實測讓每筆多花 0.3~0.5 秒）。
+    下載回應裡本來就含 details，直接重用即可。"""
+    full_record = {
+        'head': json_format.MessageToDict(res.head, preserving_proto_field_name=True) if res.head else None,
+        'data_url': res.data_url if res.data_url else None,
+    }
+
+    wrapper = pb.Wrapper()
+    wrapper.ParseFromString(res.data)
+
+    details = pb.GameDetailRecords()
+    details.ParseFromString(wrapper.data)
+
+    details_json = json_format.MessageToDict(details, preserving_proto_field_name=True)
+    full_record['details'] = details_json
+    return details_json, full_record
+
+def decode_record(res, downloader, collect_timing=False):
+    """**只做 CPU 那一段**：把原始回應轉成 (log_data, timing_data, full_record)。
+
+    純同步、無 I/O，可安全地丟進執行緒（run_in_executor）跑，不佔用 event loop。"""
+    log_data = downloader._handle_game_record(res, 0)
+    timing_data = full_record = None
+    if collect_timing:
+        try:
+            timing_data, full_record = parse_full_record(res)
+        except Exception as e:  # noqa: BLE001 timing 解析失敗不該讓整筆牌譜作廢
+            print(f"Warning: Failed to parse timing data: {str(e)}")
+    return log_data, timing_data, full_record
 
 async def download_single_log(record_uuid, downloader, collect_timing=False):
-    """使用 tensoul-py-ng 下載單個牌譜。
+    """下載並解析單個牌譜（fetch_record + decode_record 的便利組合）。
 
     回傳 (log_data, timing_data, full_record, error_msg)；成功時 error_msg 為 None，
     失敗時 log_data 為 None 且 error_msg 帶原因（供重試/斷點記錄判斷）。"""
+    res, err = await fetch_record(record_uuid, downloader)
+    if res is None:
+        return None, None, None, err
     try:
-        # tensoul 直接使用 record_uuid 下載並返回 tenhou.net/6 格式
-        # lobby_id 設為 0（默認值）
-        result = await downloader.download(record_uuid, lobby_id=0)
-
-        if result.get("is_error", False):
-            err = result.get("error_msg", "Unknown error")
-            print(f"下載牌譜 {record_uuid} 失敗: {err}")
-            return None, None, None, err
-
-        log_data = result.get("log")
-
-        # 如果需要收集思考時間，獲取原始數據
-        timing_data = None
-        full_record = None
-        if collect_timing:
-            timing_data, full_record = await fetch_raw_timing_data(record_uuid, downloader)
-
-        return log_data, timing_data, full_record, None
-
-    except Exception as e:
-        print(f"下載牌譜 {record_uuid} 失敗: {str(e)}")
+        log_data, timing_data, full_record = decode_record(res, downloader, collect_timing)
+    except Exception as e:  # noqa: BLE001 解析失敗視同該筆失敗
+        print(f"解析牌譜 {record_uuid} 失敗: {str(e)}")
         return None, None, None, str(e)
+    return log_data, timing_data, full_record, None
 
 async def main():
     # 載入設定：優先 config.ini（單一設定檔），缺檔時回退舊的 config.env。
@@ -414,34 +414,68 @@ async def main():
             await session.ensure_login()
         except download_recovery.AllAccountsFailed as e:
             checkpoint.set_pending(unique_ids)
+            checkpoint.close()
             print(f"所有帳號皆無法登入（{e}），已記錄斷點於 {checkpoint.path}")
             return
         print("登入成功！")
+        session.start_keepalive()
 
-        async def dl(uuid):
-            return await download_single_log(uuid, downloader, collect_timing)
+        # 下載迴圈只做「發請求 / 收回應」，解析與轉換丟到背景（見 handle_record）：
+        # 一次仍只有一個請求在線上（嚴格串行），但單筆的本機成本（解析約 70 ms、
+        # 寫檔、mjai-reviewer 子程序）不再串在網路等待之後，整體逼近純網路速度。
+        async def fetch_only(uuid):
+            res, err = await fetch_record(uuid, downloader)
+            return res, None, None, err
 
-        with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
-            for record_uuid in unique_ids:
-                try:
-                    log, timing_data, full_record, err = await download_recovery.download_with_retry(
-                        session, dl, record_uuid, max_attempts=max_attempts)
-                except download_recovery.AllAccountsFailed as e:
-                    aborted = True
-                    pending = [u for u in unique_ids if u not in done_uuids]
-                    checkpoint.set_pending(pending)
-                    print(f"\n所有帳號皆無法登入（{e}），中止。"
-                          f"尚餘 {len(pending)} 筆未處理，已記錄斷點於 {checkpoint.path}")
-                    break
-                done_uuids.add(record_uuid)
-                if log:
-                    checkpoint.clear_failure(record_uuid)
-                    await process_log(record_uuid, log, base_dir, timing_data, full_record, save_debug, save_raw_json)
-                    download_progress.update(1)
-                else:
-                    failed_count += 1
-                    checkpoint.record_failure(record_uuid, err or "unknown error",
-                                              session.current_username)
+        workers = min(8, os.cpu_count() or 4)
+        mjai_sem = asyncio.Semaphore(workers)
+        slots = asyncio.Semaphore(workers * 2)  # 限制在途的後處理，避免記憶體堆積
+        tasks = set()
+        loop = asyncio.get_event_loop()
+
+        async def handle_record(uuid, res, progress):
+            """背景後處理：解析（丟執行緒，不卡 event loop）＋寫檔＋轉 mjai。"""
+            try:
+                log, timing_data, full_record = await loop.run_in_executor(
+                    None, decode_record, res, downloader, collect_timing)
+                await process_log(uuid, log, base_dir, timing_data, full_record,
+                                  save_debug, save_raw_json, mjai_semaphore=mjai_sem)
+                progress.update(1)
+            except Exception as e:  # noqa: BLE001 單筆後處理失敗不影響其餘下載
+                print(f"處理牌譜 {uuid} 失敗: {str(e)}")
+            finally:
+                slots.release()
+
+        try:
+            with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
+                for record_uuid in unique_ids:
+                    try:
+                        res, _, _, err = await download_recovery.download_with_retry(
+                            session, fetch_only, record_uuid, max_attempts=max_attempts)
+                    except download_recovery.AllAccountsFailed as e:
+                        aborted = True
+                        pending = [u for u in unique_ids if u not in done_uuids]
+                        checkpoint.set_pending(pending)
+                        print(f"\n所有帳號皆無法登入（{e}），中止。"
+                              f"尚餘 {len(pending)} 筆未處理，已記錄斷點於 {checkpoint.path}")
+                        break
+                    done_uuids.add(record_uuid)
+                    if res is not None:
+                        checkpoint.clear_failure(record_uuid)
+                        await slots.acquire()
+                        task = asyncio.ensure_future(
+                            handle_record(record_uuid, res, download_progress))
+                        tasks.add(task)
+                        task.add_done_callback(tasks.discard)
+                    else:
+                        failed_count += 1
+                        checkpoint.record_failure(record_uuid, err or "unknown error",
+                                                  session.current_username)
+
+                if tasks:  # 中止與否都要等背景後處理完成，避免漏寫輸出
+                    await asyncio.gather(*list(tasks), return_exceptions=True)
+        finally:
+            await session.stop_keepalive()  # 心跳任務不可留到連線關閉之後
 
     # 清理臨時檔案
     print("\n清理臨時檔案...")
@@ -452,12 +486,13 @@ async def main():
         os.rmdir(temp_dir)
 
     if aborted:
+        checkpoint.close()
         return
+    checkpoint.set_pending([])
     if failed_count:
-        checkpoint.set_pending([])
+        checkpoint.close()
         print(f"完成，但有 {failed_count} 筆失敗（已記錄於 {checkpoint.path}，重新執行會自動重試）")
     else:
-        checkpoint.set_pending([])
         checkpoint.delete_if_clean()
         print("全部處理完成！")
 

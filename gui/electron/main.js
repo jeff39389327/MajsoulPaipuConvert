@@ -150,7 +150,8 @@ function migrateLegacyWorkDirData() {
   if (!from || !to || path.resolve(from) === path.resolve(to)) return;
 
   const ITEMS = ['mahjong_logs', 'tonpuulist.txt', 'date_room_list.txt',
-    'download_checkpoint.json', 'crawler_progress.json'];
+    'download_checkpoint.json', 'download_checkpoint_failed.jsonl',
+    'download_checkpoint_pending.txt', 'crawler_progress.json'];
   for (const name of ITEMS) {
     const src = path.join(from, name);
     const dst = path.join(to, name);

@@ -106,12 +106,22 @@ loads already-collected IDs from the output file to dedupe — so runs are resum
 
 ### Stage 2 — download + convert (`toumajsoul.py`)
 
-For each ID: `MajsoulPaipuDownloader.download()` → tenhou.net/6 dict → written to
-`mahjong_logs/tenhou/`, then `mjai-reviewer --no-review` converts it to MJAI → gzipped into
+For each ID: `fetch_record()` (one `fetchGameRecord` RPC) → `decode_record()` → tenhou.net/6 dict →
+written to `mahjong_logs/tenhou/`, then `mjai-reviewer --no-review` converts it to MJAI → gzipped into
 `mahjong_logs/mjai/*.json.gz`. Already-downloaded IDs are skipped by checking the tenhou dir.
 
+**Network / CPU split (throughput).** The serial download loop (CLI `main` and GUI `run_download`)
+must only ever `await` the network: `fetch_record` does the RPC and returns the raw response;
+`decode_record` (pure CPU — tenhou6 conversion ~70 ms/log, plus timing `MessageToDict`) runs in a
+thread via `run_in_executor` inside a **background** task that also writes the files and shells out
+to `mjai-reviewer`, bounded by a `slots` semaphore. Measured: the Majsoul RTT is ~0.45 s/log and is
+the floor for strictly-serial downloads; anything done inline in the loop is added straight on top of
+it. Keep new per-log work out of the loop.
+
 **Thinking-time injection** (when `COLLECT_TIMING=true`) is the subtle part:
-`fetch_raw_timing_data` pulls raw protobuf `GameDetailRecords`; `extract_timing_data` walks the
+`parse_full_record` re-uses the **already-downloaded** response to get raw protobuf
+`GameDetailRecords` (do not re-fetch — that used to be a second full download per log);
+`extract_timing_data` walks the
 actions and builds a `(seat, action_sequence_index) → timeuse_ms` map (incrementing a per-seat
 counter on each discard/call, **skipping cancelled calls**); `inject_timing_to_mjai` then replays the
 *same* per-actor counter over the MJAI event stream to attach `think_ms`. The two counters must stay
@@ -130,11 +140,20 @@ The GUI owns `config.ini`; on error 151, the recovered `ms_res_version` is writt
 **Failure recovery (`download_recovery.py`, shared by CLI and GUI backend).** Accounts come from
 `load_accounts()`: primary `[account]` credentials plus `account_pool` (a JSON array of
 `{"username","password"}`; reaches Python as env `ACCOUNT_POOL`). `AccountSession` wraps the single
-shared `MajsoulPaipuDownloader`: on a download failure, `download_with_retry` first reconnects and
-re-logs-in with the *same* account (which covers error 151 via the auto resource-version update),
-then on the next failure rotates to the next pool account. **Downloads are strictly serial** — one
-account, one websocket, one in-flight RPC (user requirement; CLI and GUI both): only the mjai
-conversion fans out in parallel (GUI `run_download.py` spawns background convert tasks). The
+shared `MajsoulPaipuDownloader`. `download_with_retry` **classifies the error first**
+(`classify`-style helpers `is_permanent_error` / `is_session_error` / `is_auth_error`): a record-level
+error (1203) is the server's final answer for that uuid → give up immediately, no retry, no reconnect,
+no account rotation (reconnect+relogin per dead ID used to cost 2–5 s each and churned the pool); a
+session/connection error (151, 1004, dead websocket, timeout) reconnects and re-logs-in with the
+*same* account (which covers error 151 via the auto resource-version update), and only the next
+failure rotates to the next pool account; an unknown error retries once in place first. Safety net:
+`note_failure` forces one reconnect after `_RECOVER_AFTER_CONSECUTIVE` consecutive non-permanent
+failures. Login failures only mark an account dead when they are *auth* errors — otherwise one
+network blip would kill the whole pool. `AccountSession.start_keepalive()` sends `.lq.Lobby.heatbeat`
+every 6 s so long runs don't get the session dropped (stop it with `stop_keepalive` in a `finally`
+before the channel closes). **Downloads are strictly serial** — one
+account, one websocket, one in-flight *download* RPC (user requirement; CLI and GUI both; the
+keepalive is not a download): only decode + mjai conversion fan out in the background. The
 `generation` counter + asyncio lock + ready-event fence (`wait_ready` at the top of each
 `download_with_retry` attempt) remain as defense-in-depth: a request sent during the reconnect
 window hits a half-built channel (`'NoneType' object has no attribute 'send'`) or a
@@ -147,12 +166,22 @@ define, so `ms_patch.patch_route_connect()` appends it as a raw wire-format fiel
 automatically by `ensure_ms_cfg()`). Quick triage: log in with a **nonexistent account** — 1002 means
 version-only (probing can fix it), 151 means the request/handshake format changed again and version
 probing is futile. Only when *every* account fails to log in does
-it raise `AllAccountsFailed` — the run aborts and `Checkpoint` (`download_checkpoint.json` in the
-work dir) records the failed map (`uuid → {error, account, ts}`) and the still-pending list. Failed
+it raise `AllAccountsFailed` — the run aborts and `Checkpoint` records the failed map
+(`uuid → {error, account, ts}`) and the still-pending list. Failed
 uuids are retried automatically on the next run (they're not in the tenhou dir, so the normal dedupe
-re-queues them); the checkpoint file is deleted when a run ends fully clean. `download_single_log`
-returns a 4-tuple `(log, timing, full_record, error_msg)` — keep its error contract intact, the
-retry logic keys off `log is None`.
+re-queues them); the checkpoint is deleted when a run ends fully clean.
+
+`Checkpoint` is **three files** in the work dir (v2, old single-file v1 auto-migrates on load):
+`download_checkpoint.json` (small summary only), `download_checkpoint_failed.jsonl` (append-only, one
+line per failure, tombstone line on clear, compacted by `close()`), `download_checkpoint_pending.txt`
+(one uuid per line, written only on abort/finish). Never put the pending list back into the JSON:
+`record_failure` runs per failed log, and with a real 2.28 M-uuid pending list the v1 full rewrite was
+119 MB / 0.66 s **per failure**. Call `close()` when a run ends.
+
+`download_with_retry`'s `download_fn` must return a 4-tuple `(value, timing, full, error_msg)` where
+`value is None` means failure — the runners pass a fetch-only fn returning `(res, None, None, err)`,
+while `download_single_log` (used by `majsoul_get.py` / `run_sanma_accept.py`) still returns the fully
+decoded `(log, timing, full_record, error_msg)`.
 
 ## Gotchas
 
