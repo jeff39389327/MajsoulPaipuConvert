@@ -145,6 +145,7 @@
   "download.idle": "Not started",
   "download.summary": "Downloaded {dl} / {total}, converted {cv}",
   "download.summaryFail": "Downloaded {dl} / {total}, converted {cv}, failed {fail}",
+  "download.speed": "{rate}/s · network {net}s per log · ~{eta} left",
   "download.done": "Done: {downloaded} / {total} converted successfully",
   "download.failedSummary": "{fail} download(s) failed (recorded in the checkpoint file; retried automatically on the next run)",
   "download.checkpoint": "Open checkpoint file location",

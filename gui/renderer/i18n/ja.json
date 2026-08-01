@@ -145,6 +145,7 @@
   "download.idle": "未開始",
   "download.summary": "DL {dl} / {total}、変換済 {cv}",
   "download.summaryFail": "DL {dl} / {total}、変換済 {cv}、失敗 {fail}",
+  "download.speed": "{rate} 件/秒 · 通信 {net}s/件 · 残り約 {eta}",
   "download.done": "完了：{downloaded} / {total} 件を変換",
   "download.failedSummary": "{fail} 件のダウンロードに失敗（チェックポイントに記録済み。次回実行時に自動再試行）",
   "download.checkpoint": "チェックポイントの場所を開く",

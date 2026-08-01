@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import re
@@ -438,6 +439,14 @@ class Checkpoint:
         self._write_pending()
         self.save()
 
+    def forget_pending(self) -> None:
+        """把 pending 從**記憶體**釋放（磁碟檔不動）。
+
+        呼叫端把 pending 併進工作清單後就不再需要這份副本；百萬筆規模下它是好幾百 MB，
+        留著只是讓整個下載期間都背著。磁碟上的 _pending.txt 仍是下次續跑的來源，
+        只有 set_pending() 會覆寫它。"""
+        self.data["pending"] = []
+
     def save(self) -> None:
         """寫出摘要主檔（小檔，可頻繁呼叫）。"""
         meta = {
@@ -536,8 +545,11 @@ def merge_checkpoint_ids(ids, checkpoint: Checkpoint) -> list:
 
     這是斷點真正被「讀取來驅動續跑」的地方——在此之前 pending 只寫不讀，一旦 ID
     清單被重爬覆蓋或換檔，上次中止剩下的項目就默默消失。合併後交給呼叫端既有的
-    「tenhou/ 已存在檔案」過濾去掉已完成項。"""
-    return list(dict.fromkeys(list(ids) + list(checkpoint.pending) + list(checkpoint.failed)))
+    「tenhou/ 已存在檔案」過濾去掉已完成項。
+
+    以 chain 串接而非先 list 相加：百萬筆規模時，那個中間串接清單本身就是數百 MB。"""
+    return list(dict.fromkeys(
+        itertools.chain(ids, checkpoint.pending, checkpoint.failed)))
 
 
 async def download_with_retry(session: AccountSession, download_fn, uuid: str,

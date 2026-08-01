@@ -145,6 +145,7 @@
   "download.idle": "尚未開始",
   "download.summary": "下載 {dl} / {total}，已轉換 {cv}",
   "download.summaryFail": "下載 {dl} / {total}，已轉換 {cv}，失敗 {fail}",
+  "download.speed": "{rate} 筆/秒 · 網路 {net}s/筆 · 剩約 {eta}",
   "download.done": "完成：成功轉換 {downloaded} / {total} 筆",
   "download.failedSummary": "{fail} 筆下載失敗（已記錄於斷點檔，下次執行會自動重試）",
   "download.checkpoint": "開啟斷點檔位置",

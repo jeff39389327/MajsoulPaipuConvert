@@ -384,25 +384,32 @@ async def main():
         print("沒有新的牌譜需要下載")
         return
 
+    # 逐行寫（不要 '\n'.join）：百萬筆規模時那個中間字串本身就是上百 MB。
     with open(temp_file, 'w', encoding='UTF-8') as f:
-        f.write('\n'.join(unique_ids))
+        f.writelines(f"{uuid}\n" for uuid in unique_ids)
 
     # 帳號池（主帳號＋config.ini [account] account_pool）
     accounts = download_recovery.load_accounts({"username": username, "password": password})
     if not accounts:
         print("錯誤：尚未設定雀魂帳號（config.ini [account]）")
         return
-    resume_set = set(checkpoint.failed) | set(checkpoint.pending)
-    retrying = [u for u in unique_ids if u in resume_set]
-    if retrying:
-        print(f"偵測到上次失敗/中止的 {len(retrying)} 筆，將自動續跑")
+    # 只要「有幾筆是續跑的」，不要為此再造一份百萬筆清單。
+    resume_set = set(checkpoint.pending)
+    resume_set.update(checkpoint.failed)
+    retry_count = sum(1 for u in unique_ids if u in resume_set)
+    del resume_set
+    checkpoint.forget_pending()  # 已併入工作清單，記憶體中不需再留（磁碟檔仍在）
+    if retry_count:
+        print(f"偵測到上次失敗/中止的 {retry_count} 筆，將自動續跑")
     ini_paths = [p for p in (config_store.default_path(),) if os.path.exists(p)]
     max_attempts = 3 if len(accounts) > 1 else 2
 
     print("開始下載牌譜...")
     failed_count = 0
     aborted = False
-    done_uuids = set()
+    # 串行依序處理，故「未處理的」＝目前索引之後的切片（不必留 done_uuids 集合，
+    # 百萬筆規模下那是另一份數百 MB 的副本）。
+    next_index = 0
 
     # 初始化 tensoul downloader 並登入（失敗時自動更新版本/換帳號，見 download_recovery）
     async with MajsoulPaipuDownloader() as downloader:
@@ -448,18 +455,19 @@ async def main():
 
         try:
             with tqdm(total=total_unique_ids, desc="下載進度", unit="log") as download_progress:
-                for record_uuid in unique_ids:
+                for index, record_uuid in enumerate(unique_ids):
+                    next_index = index
                     try:
                         res, _, _, err = await download_recovery.download_with_retry(
                             session, fetch_only, record_uuid, max_attempts=max_attempts)
                     except download_recovery.AllAccountsFailed as e:
                         aborted = True
-                        pending = [u for u in unique_ids if u not in done_uuids]
+                        pending = unique_ids[next_index:]
                         checkpoint.set_pending(pending)
                         print(f"\n所有帳號皆無法登入（{e}），中止。"
                               f"尚餘 {len(pending)} 筆未處理，已記錄斷點於 {checkpoint.path}")
                         break
-                    done_uuids.add(record_uuid)
+                    next_index = index + 1
                     if res is not None:
                         checkpoint.clear_failure(record_uuid)
                         await slots.acquire()

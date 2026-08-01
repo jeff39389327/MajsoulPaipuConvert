@@ -45,10 +45,26 @@ export function renderDownload(ctx, container) {
   let dlDone = 0;
   let cvDone = 0;
   let failCount = 0;
+  let speed = null; // {rate: 筆/秒, net: 每筆網路秒數} —— 由後端 progress 事件帶入
 
-  const summaryText = (tot) => failCount > 0
-    ? t('download.summaryFail', { dl: dlDone, cv: cvDone, total: tot, fail: failCount })
-    : t('download.summary', { dl: dlDone, cv: cvDone, total: tot });
+  // 剩餘時間（粗估）：以目前平均速率換算，只顯示到分鐘/小時級別。
+  const etaText = (remain, rate) => {
+    const secs = Math.round(remain / rate);
+    if (secs < 90) return `${secs}s`;
+    if (secs < 5400) return `${Math.round(secs / 60)}m`;
+    const hours = secs / 3600;
+    return hours < 48 ? `${hours.toFixed(1)}h` : `${Math.round(hours / 24)}d`;
+  };
+
+  const summaryText = (tot) => {
+    const base = failCount > 0
+      ? t('download.summaryFail', { dl: dlDone, cv: cvDone, total: tot, fail: failCount })
+      : t('download.summary', { dl: dlDone, cv: cvDone, total: tot });
+    // 速度讀數讓「慢」可被歸因：net 大＝雀魂/網路慢，net 小但 rate 低＝卡在本機。
+    if (!speed || !speed.rate) return base;
+    const eta = tot > dlDone ? etaText(tot - dlDone, speed.rate) : '0s';
+    return `${base}　${t('download.speed', { rate: speed.rate, net: speed.net, eta })}`;
+  };
 
   const off = ctx.onJobEvent((ev) => {
     if (ev.stage === 'download' && ev.type === 'stage_start') {
@@ -56,6 +72,7 @@ export function renderDownload(ctx, container) {
     } else if (ev.type === 'progress' && ev.phase === 'download') {
       dlDone = ev.done;
       failCount = ev.failed || failCount;
+      if (ev.rate) speed = { rate: ev.rate, net: (ev.net_ms / 1000).toFixed(2) };
       setBar(dlBar, ev.done, ev.total || total);
       label.textContent = summaryText(ev.total || total);
     } else if (ev.type === 'progress' && ev.phase === 'mjai') {
@@ -113,7 +130,7 @@ export function renderDownload(ctx, container) {
 
   async function startDownload() {
     result.innerHTML = '';
-    dlDone = 0; cvDone = 0; failCount = 0;
+    dlDone = 0; cvDone = 0; failCount = 0; speed = null;
     setBar(dlBar, 0, 1); setBar(cvBar, 0, 1);
     label.textContent = t('status.running');
     const params = {};

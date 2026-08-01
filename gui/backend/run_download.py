@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 
 from . import bridge, paths
 
@@ -126,15 +127,22 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
         return
     unique_ids = _filter_existing(ids, base_dir)
     total = len(unique_ids)
+    del ids  # 百萬筆規模時每份副本都是數百 MB，用不到就立刻放掉
 
-    resume_set = set(checkpoint.failed) | set(checkpoint.pending)
-    retrying = [u for u in unique_ids if u in resume_set]
+    # 只要「有幾筆是續跑的」，不要為此再造一份百萬筆清單。
+    resume_set = set(checkpoint.pending)
+    resume_set.update(checkpoint.failed)
+    retry_count = sum(1 for u in unique_ids if u in resume_set)
+    del resume_set
+    # pending 已併入工作清單，記憶體中不需再留（磁碟上的 _pending.txt 仍是續跑來源，
+    # 只有 set_pending() 會覆寫它）。
+    checkpoint.forget_pending()
 
     bridge.stage_start("download", total=total, collect_timing=collect_timing,
                        convert_concurrency=convert_concurrency,
                        accounts=len(accounts), input_list=input_path)
-    if retrying:
-        bridge.notice("download", "RETRY_PREV_FAILED", str(len(retrying)))
+    if retry_count:
+        bridge.notice("download", "RETRY_PREV_FAILED", str(retry_count))
 
     if total == 0:
         bridge.stage_done("download", downloaded=0, total=0,
@@ -144,7 +152,9 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
 
     mj_sem = asyncio.Semaphore(convert_concurrency)
     counters = {"dl": 0, "cv": 0, "fail": 0}
-    done_uuids: set = set()
+    # 下載是嚴格串行、依序走 unique_ids，所以「還沒處理的」＝目前索引之後的切片。
+    # 不用 done_uuids 集合：百萬筆規模下它會長成另一份數百 MB 的副本。
+    next_index = 0
     failures: list[dict] = []
     state = {"aborted": False}
     convert_tasks: set = set()
@@ -210,27 +220,36 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
 
         # 下載嚴格串行（單帳號單連線，一次只一個 RPC 在線上）；
         # 轉換丟背景 task 並行跑，不阻塞下一筆下載。
+        started = time.perf_counter()
         try:
-            for uuid in unique_ids:
+            for index, uuid in enumerate(unique_ids):
+                next_index = index
+                t0 = time.perf_counter()
                 try:
                     res, _, _, err = await download_recovery.download_with_retry(
                         session, download_fn, uuid, max_attempts=max_attempts)
                 except download_recovery.AllAccountsFailed:
                     state["aborted"] = True
                     break
-                done_uuids.add(uuid)
+                # net_ms＝這筆花在雀魂來回的時間，rate＝整體平均筆/秒。慢的時候可據此
+                # 分辨是網路（net_ms 就很大）還是本機（net_ms 小但 rate 低）。
+                net_ms = int((time.perf_counter() - t0) * 1000)
                 counters["dl"] += 1
+                next_index = index + 1
+                rate = round(counters["dl"] / max(1e-6, time.perf_counter() - started), 2)
                 if res is None:
                     counters["fail"] += 1
                     failures.append({"uuid": uuid, "error": err or "unknown error"})
                     checkpoint.record_failure(uuid, err or "unknown error",
                                               session.current_username)
                     bridge.progress("download", phase="download", done=counters["dl"],
-                                    total=total, uuid=uuid, ok=False, failed=counters["fail"])
+                                    total=total, uuid=uuid, ok=False, failed=counters["fail"],
+                                    net_ms=net_ms, rate=rate)
                     continue
                 checkpoint.clear_failure(uuid)
                 bridge.progress("download", phase="download", done=counters["dl"], total=total,
-                                uuid=uuid, ok=True, failed=counters["fail"])
+                                uuid=uuid, ok=True, failed=counters["fail"],
+                                net_ms=net_ms, rate=rate)
                 await slots.acquire()
                 task = asyncio.ensure_future(convert(uuid, res))
                 convert_tasks.add(task)
@@ -250,8 +269,8 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
         pass
 
     if state["aborted"]:
-        # 號池全滅：記錄斷點（剩餘未處理清單），下次執行自動續跑。
-        pending = [u for u in unique_ids if u not in done_uuids]
+        # 號池全滅：記錄斷點（剩餘未處理清單＝索引之後的切片），下次執行自動續跑。
+        pending = unique_ids[next_index:]
         checkpoint.set_pending(pending)
         checkpoint.close()
         bridge.error("download", "ALL_ACCOUNTS_FAILED",
