@@ -23,6 +23,7 @@ const state = {
   releasesUrl: '', // 更新橫幅「改用瀏覽器下載」退路（由主程序依 publish 設定推導）
   config: { env: {}, crawler: null },
   doctor: null,
+  nettest: null, // 雀魂連線測速結果（設定頁自檢面板顯示）
   crawlOutputFile: null, // Stage 1 完成後的輸出檔，供 Stage 2 自動接手
   downloadInputList: null, // 下載頁的 ID 清單（txt）路徑；爬取完成會自動帶入，也可手動指定
   autoStartDownload: false, // 由 crawl 自動串接時設 true，download view 進場即自動開始
@@ -242,6 +243,16 @@ async function runDoctor() {
   return result;
 }
 
+// 雀魂連線測速：純延遲（heatbeat）vs 實際牌譜，用來分辨「慢在網路還是流程」。
+async function runNetTest() {
+  let result = null;
+  await runJob('nettest', {}, (ev) => {
+    if (ev.type === 'stage_done' && ev.stage === 'nettest') result = ev.stats;
+  });
+  state.nettest = result;
+  return result;
+}
+
 // ---- 導覽與繪製 ---------------------------------------------------------
 let activeCleanup = null;
 
@@ -260,6 +271,7 @@ const ctx = {
   toast,
   refreshConfig,
   runDoctor,
+  runNetTest,
 };
 
 function renderNav() {

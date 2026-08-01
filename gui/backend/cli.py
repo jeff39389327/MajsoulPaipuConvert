@@ -8,6 +8,7 @@ dev 模式可用 `python -m gui.backend.cli <cmd>`；凍結後即 `backend.exe <
   crawl        執行 Stage 1 (run_crawler)
   download     執行 Stage 2 (run_download，並行)
   doctor       環境自檢
+  nettest      雀魂連線測速（純延遲 vs 實際牌譜，判斷慢在網路還是流程）
   __extractor  (內部) 凍結模式下逐日 extractor 的自我再入；輸出原始 UUID 到真 stdout，
                供 PaipuSpider 的子程序解析迴圈讀取 (取代寫臨時 py 腳本 + python)。
 
@@ -72,6 +73,10 @@ def main(argv: list[str] | None = None) -> None:
         from . import doctor
 
         doctor.run(bridge.read_params())
+    elif cmd == "nettest":
+        from . import nettest
+
+        nettest.run(bridge.read_params())
     elif cmd == "__extractor":
         _run_extractor(argv[1:])
     else:

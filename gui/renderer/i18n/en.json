@@ -19,6 +19,7 @@
   "btn.rerun": "Clear progress & restart",
   "btn.continue": "Continue",
   "btn.runDoctor": "Re-check environment",
+  "btn.runNetTest": "Test Majsoul connection",
   "btn.toDownload": "Go to download & convert",
   "btn.openFolder": "Open folder",
   "btn.openConfig": "Open config file location",
@@ -87,6 +88,8 @@
   "env.tensoul.ok": "tensoul-py-ng found",
   "env.tensoul.missing": "tensoul-py-ng not found (please clone it first)",
   "env.workdir.ok": "Work folder is writable",
+  "env.net.result": "Majsoul link: latency {ping} ms · record {fetch} ms each ({kb} KB, ~{kbps} KB/s). Typical is ~50 ms / ~400 ms; record time far above latency means bandwidth or packet loss",
+  "env.net.failed": "Connection test failed: {msg}",
   "env.workdir.missing": "Work folder is not writable",
 
   "mode.title": "Choose download method",

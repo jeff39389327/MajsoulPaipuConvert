@@ -19,6 +19,7 @@
   "btn.rerun": "清除進度重來",
   "btn.continue": "繼續",
   "btn.runDoctor": "重新檢查環境",
+  "btn.runNetTest": "雀魂連線測速",
   "btn.toDownload": "進入下載與轉換",
   "btn.openFolder": "開啟資料夾",
   "btn.openConfig": "開啟設定檔位置",
@@ -87,6 +88,8 @@
   "env.tensoul.ok": "已找到 tensoul-py-ng",
   "env.tensoul.missing": "找不到 tensoul-py-ng（請先 clone）",
   "env.workdir.ok": "工作資料夾可寫入",
+  "env.net.result": "雀魂連線：延遲 {ping} ms · 牌譜 {fetch} ms/筆（{kb} KB，約 {kbps} KB/s）。正常約 50 ms／400 ms；牌譜時間遠大於延遲＝頻寬或丟包問題",
+  "env.net.failed": "連線測速失敗：{msg}",
   "env.workdir.missing": "工作資料夾無法寫入",
 
   "mode.title": "選擇下載方式",

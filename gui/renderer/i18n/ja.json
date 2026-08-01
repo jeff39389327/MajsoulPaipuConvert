@@ -19,6 +19,7 @@
   "btn.rerun": "進捗を消して最初から",
   "btn.continue": "続行",
   "btn.runDoctor": "環境を再確認",
+  "btn.runNetTest": "雀魂接続テスト",
   "btn.toDownload": "ダウンロードと変換へ",
   "btn.openFolder": "フォルダを開く",
   "btn.openConfig": "設定ファイルの場所を開く",
@@ -87,6 +88,8 @@
   "env.tensoul.ok": "tensoul-py-ng を検出",
   "env.tensoul.missing": "tensoul-py-ng が見つかりません（先に clone してください）",
   "env.workdir.ok": "作業フォルダは書き込み可能",
+  "env.net.result": "雀魂接続：遅延 {ping} ms · 牌譜 {fetch} ms/件（{kb} KB、約 {kbps} KB/s）。標準は約 50 ms／400 ms。牌譜時間が遅延より大幅に長い場合は帯域またはパケットロス",
+  "env.net.failed": "接続テスト失敗：{msg}",
   "env.workdir.missing": "作業フォルダに書き込めません",
 
   "mode.title": "ダウンロード方式を選択",

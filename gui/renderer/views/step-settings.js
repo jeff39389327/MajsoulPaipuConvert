@@ -198,10 +198,28 @@ function renderDoctorPanel(ctx) {
     wrap.append(h('div', { class: cls }, msg));
   }
 
+  // 連線測速結果：純延遲（heatbeat）與實際牌譜分開列，才分得出「線路慢」還是「流程慢」。
+  const n = state.nettest;
+  if (n) {
+    if (n.error) {
+      wrap.append(h('div', { class: 'notice err' }, t('env.net.failed', { msg: n.error })));
+    } else {
+      wrap.append(h('div', { class: 'notice' }, t('env.net.result', {
+        ping: n.ping_ms ?? '-', fetch: n.fetch_ms ?? '-',
+        kb: n.fetch_kb ?? '-', kbps: n.kbps ?? '-',
+      })));
+    }
+  }
+
   const recheck = h('button', { class: 'ghost', onclick: async () => {
     await ctx.runDoctor();
     ctx.rerender();
   } }, t('btn.runDoctor'));
-  wrap.append(h('div', { class: 'actions' }, recheck));
+  const nettest = h('button', { class: 'ghost', onclick: async (e) => {
+    e.target.disabled = true;
+    await ctx.runNetTest();
+    ctx.rerender();
+  } }, t('btn.runNetTest'));
+  wrap.append(h('div', { class: 'actions' }, recheck, nettest));
   return wrap;
 }
