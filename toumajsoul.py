@@ -465,7 +465,10 @@ async def main():
                         aborted = True
                         pending = unique_ids[next_index:]
                         checkpoint.set_pending(pending)
-                        print(f"\n所有帳號皆無法登入（{e}），中止。"
+                        # 網路持續不通與帳號全滅要分開講，否則會誤導使用者去檢查帳密。
+                        cause = ("連線持續不通" if isinstance(e, download_recovery.ConnectionLost)
+                                 else "所有帳號皆無法登入")
+                        print(f"\n{cause}（{e}），中止。"
                               f"尚餘 {len(pending)} 筆未處理，已記錄斷點於 {checkpoint.path}")
                         break
                     next_index = index + 1

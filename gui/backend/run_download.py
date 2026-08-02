@@ -228,8 +228,9 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
                 try:
                     res, _, _, err = await download_recovery.download_with_retry(
                         session, download_fn, uuid, max_attempts=max_attempts)
-                except download_recovery.AllAccountsFailed:
+                except download_recovery.AllAccountsFailed as exc:
                     state["aborted"] = True
+                    state["abort_exc"] = exc
                     break
                 # net_ms＝這筆花在雀魂來回的時間，rate＝整體平均筆/秒。慢的時候可據此
                 # 分辨是網路（net_ms 就很大）還是本機（net_ms 小但 rate 低）。
@@ -257,8 +258,9 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
                     try:
                         await session.recover(session.generation, force_switch=True,
                                               reason=f"連線異常緩慢（{slow:.1f}s/筆）")
-                    except download_recovery.AllAccountsFailed:
+                    except download_recovery.AllAccountsFailed as exc:
                         state["aborted"] = True
+                        state["abort_exc"] = exc
                         break
                 await slots.acquire()
                 task = asyncio.ensure_future(convert(uuid, res))
@@ -279,12 +281,17 @@ async def _run_async(params: dict, work_dir: str, repo_root: str) -> None:
         pass
 
     if state["aborted"]:
-        # 號池全滅：記錄斷點（剩餘未處理清單＝索引之後的切片），下次執行自動續跑。
+        # 中止：記錄斷點（剩餘未處理清單＝索引之後的切片），下次執行自動續跑。
         pending = unique_ids[next_index:]
         checkpoint.set_pending(pending)
         checkpoint.close()
-        bridge.error("download", "ALL_ACCOUNTS_FAILED",
-                     f"尚餘 {len(pending)} 筆未處理，斷點：{checkpoint.path}", fatal=True)
+        exc = state.get("abort_exc")
+        # 兩種中止要分開講：連線持續不通（網路/閘道）不該叫使用者去檢查根本沒問題的帳密。
+        code = ("NETWORK_UNAVAILABLE"
+                if isinstance(exc, download_recovery.ConnectionLost) else "ALL_ACCOUNTS_FAILED")
+        detail = f"{exc}；" if exc else ""
+        bridge.error("download", code,
+                     f"{detail}尚餘 {len(pending)} 筆未處理，斷點：{checkpoint.path}", fatal=True)
         bridge.done(ok=False, exit_code=1)
         return
 

@@ -110,6 +110,7 @@ def ensure_ms_cfg(tensoul_dir: str = "tensoul-py-ng") -> None:
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
     patch_route_connect()
+    patch_ws_keepalive()
 
 
 # ReqRequestConnection 的第 6 欄 (string) = 平台字串 "Web"。ms-api 的 protocol_pb2 沒有這欄
@@ -161,6 +162,59 @@ def patch_route_connect() -> None:
 
     patched_route_connect._ms_patched = True
     MajsoulPaipuDownloader.route_connect = patched_route_connect
+
+
+# websockets 客戶端 keepalive 的預設值 (12.0)：每 20s 送一次 ping，20s 內收不到 pong 就
+# 自行把連線關掉 (close code 1011 "keepalive ping timeout")。實測長時間批次下載會踩到——
+# 台灣→CN 的線路偶爾卡個 20 幾秒、或本機被背景解析/寫檔搶滿 CPU 導致 pong 沒被及時處理，
+# 都會讓一條其實還活著的連線被我們自己砍掉，然後整套重連＋重登 (2~5s) 白跑一次。
+# 放寬 pong 等待上限即可：會話存活本來就靠應用層心跳 (.lq.Lobby.heatbeat, 6s 一次) 維持，
+# 而真的死掉的連線另有下載端 45s 逾時會抓到，不必靠 ws ping 這麼急著判死。
+_WS_PING_INTERVAL = float(os.getenv("MS_WS_PING_INTERVAL", "") or 20)
+_WS_PING_TIMEOUT = float(os.getenv("MS_WS_PING_TIMEOUT", "") or 90)
+# 單一訊息上限。websockets 預設 1 MiB，牌譜回應多半 100~300 KB，但長半莊/大量副露的
+# GameDetailRecords 可能逼近上限；超過會被關連線 (1009)，故給足餘裕。
+_WS_MAX_SIZE = 32 * 1024 * 1024
+
+
+def patch_ws_keepalive() -> None:
+    """放寬 ms-api MSRPCChannel 建立 websocket 時的 keepalive 參數，並在連線斷掉時
+    立刻喚醒等待回應的請求。重複呼叫為 no-op。
+
+    第二件事的理由：ms-api 的 `send_request` 送完封包後 `await evt.wait()`，而負責收訊息
+    的 `dispatch_msg` 在連線斷掉時會拋 ConnectionClosed 直接結束——沒有人再去 set 那個
+    event，於是「連線斷掉當下正在飛的那一筆」會一路卡到上層 45s 逾時才被判定失敗。
+    連線既然已經死了，就該當場失敗、當場進復原流程。"""
+    from ms.base import MSRPCChannel  # ms-api；此處才 import 以免影響模組載入順序
+
+    if getattr(MSRPCChannel.connect, "_ms_patched", False):
+        return
+
+    import asyncio
+
+    import websockets
+
+    async def _dispatch_and_wake(channel) -> None:
+        try:
+            await channel.dispatch_msg()
+        except Exception:  # noqa: BLE001 連線斷掉就是這個 task 的正常結局；吞掉以免 asyncio
+            pass           # 印出整段 "Task exception was never retrieved"（真正的失敗會由
+                           # 下面被喚醒的那筆請求回報出來）。
+        finally:
+            # 喚醒所有還在等回應的請求：send_request 會因 idx 不在 _res 而回傳 None，
+            # 上層隨即以「連線層錯誤」失敗 → download_with_retry 判為 session error → 重連。
+            for evt in list(channel._req_events.values()):
+                evt.set()
+
+    async def patched_connect(self, ms_host):
+        self._ws = await websockets.connect(
+            self._endpoint, origin=ms_host,
+            ping_interval=_WS_PING_INTERVAL, ping_timeout=_WS_PING_TIMEOUT,
+            close_timeout=5, max_size=_WS_MAX_SIZE)
+        self._msg_dispatcher = asyncio.create_task(_dispatch_and_wake(self))
+
+    patched_connect._ms_patched = True
+    MSRPCChannel.connect = patched_connect
 
 
 def build_login_req(account: str, password: str) -> pb.ReqLogin:

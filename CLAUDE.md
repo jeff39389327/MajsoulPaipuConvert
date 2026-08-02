@@ -157,6 +157,13 @@ every 6 s so long runs don't get the session dropped (stop it with `stop_keepali
 before the channel closes). **Downloads are strictly serial** — one
 account, one websocket, one in-flight *download* RPC (user requirement; CLI and GUI both; the
 keepalive is not a download): only decode + mjai conversion fan out in the background. The
+**websocket-level keepalive is patched too** (`ms_patch.patch_ws_keepalive()`, also applied by
+`ensure_ms_cfg()`): the `websockets` client defaults to killing a connection that doesn't pong within
+20 s (`close code 1011 keepalive ping timeout`), which fires on a normal Taiwan→CN hiccup and costs a
+full reconnect+relogin — the pong window is raised to 90 s (session liveness is the app-level
+heartbeat's job) and `max_size` to 32 MiB. The same patch wraps `dispatch_msg` so that when the socket
+dies it wakes every pending `send_request`, otherwise the RPC in flight at that moment hangs until the
+45 s `download_with_retry` timeout instead of failing (and recovering) immediately. The
 `generation` counter + asyncio lock + ready-event fence (`wait_ready` at the top of each
 `download_with_retry` attempt) remain as defense-in-depth: a request sent during the reconnect
 window hits a half-built channel (`'NoneType' object has no attribute 'send'`) or a
@@ -168,7 +175,17 @@ and written back to `config.ini`), *or* a handshake the server no longer accepts
 define, so `ms_patch.patch_route_connect()` appends it as a raw wire-format field (applied
 automatically by `ensure_ms_cfg()`). Quick triage: log in with a **nonexistent account** — 1002 means
 version-only (probing can fix it), 151 means the request/handshake format changed again and version
-probing is futile. Only when *every* account fails to log in does
+probing is futile. **Reconnecting is retried, and a network outage is not an account problem**:
+`_reconnect` retries `_RECONNECT_ATTEMPTS` times (each bounded by `_RECONNECT_TIMEOUT` — tensoul's
+`_connect` uses aiohttp's 5-minute default, which would freeze the whole batch), and if it still can't
+reach the server it raises `NetworkUnavailable`, which `_recover_locked` waits out over
+`_NETWORK_RETRY_DELAYS` (5/15/30/60 s, `NETWORK_RETRY` notice each time) with the *same* account —
+rotating accounts against a dead network just empties the pool. Only after those are exhausted does it
+raise `ConnectionLost` (a subclass of `AllAccountsFailed`, so callers still abort + checkpoint, but the
+GUI/CLI can report "can't reach the server" instead of "check your credentials").
+Use `describe_error()` rather than `str(exc)` for any logged/recorded failure: connection-layer
+exceptions (`asyncio.TimeoutError`, bare `OSError`) stringify to `""`, which used to produce log lines
+like `重新連線失敗: ` that were impossible to diagnose. Only when *every* account fails to log in does
 it raise `AllAccountsFailed` — the run aborts and `Checkpoint` records the failed map
 (`uuid → {error, account, ts}`) and the still-pending list. Failed
 uuids are retried automatically on the next run (they're not in the tenhou dir, so the normal dedupe

@@ -38,6 +38,27 @@ class AllAccountsFailed(RuntimeError):
     """號池中所有帳號皆無法登入（呼叫端應中止並記錄斷點）。"""
 
 
+class NetworkUnavailable(RuntimeError):
+    """重連時連不上雀魂（網路/閘道問題，與帳號無關）——換帳號無用，等一下再試才有用。"""
+
+
+class ConnectionLost(AllAccountsFailed):
+    """等待重試後仍連不上，只好中止。繼承 AllAccountsFailed 讓既有呼叫端照舊中止＋寫斷點，
+    但可用 isinstance 分辨，避免把網路問題報成「請檢查帳號密碼」。"""
+
+
+def describe_error(err) -> str:
+    """把例外轉成「一定看得懂」的字串：型別名 + 訊息。
+
+    連線層例外常常 str() 是空字串（asyncio.TimeoutError、無參數的 OSError/ConnectionResetError），
+    直接印出來只會看到「重新連線失敗: 」這種完全無從追查的日誌，故一律補上型別名。"""
+    text = str(err).strip()
+    if isinstance(err, BaseException):
+        name = type(err).__name__
+        return f"{name}: {text}" if text else name
+    return text or "unknown error"
+
+
 # ── 錯誤分類 ──────────────────────────────────────────────────────────────
 # 為什麼要分類：舊版對「任何失敗」一律重連＋重登（0.7s 握手＋0.3s 登入＋退避 1~2s），
 # 但最常見的失敗是 **1203 牌譜不存在**（爬到的 ID 早已被雀魂清掉），那是伺服器對該 uuid
@@ -49,10 +70,23 @@ _SESSION_CODES = {"151", "1004"}     # 151=客戶端版本/握手被拒、1004=�
 # 連線層例外（websocket 已死、復原窗口內送出、逾時）——訊息沒有 code 可抓，用特徵字串。
 _SESSION_PATTERNS = (
     "nonetype", "connectionclosed", "connection is closed", "no close frame",
-    "timeout after", "cannot write to closing", "socket", "winerror", "eof",
+    "timeout", "cannot write to closing", "socket", "winerror", "eof",
+    "keepalive ping",
 )
 # 連續失敗達此數量就強制重建一次連線（防「未知原因整批失敗」時我們毫無反應地空轉）。
 _RECOVER_AFTER_CONSECUTIVE = 20
+
+# ── 重連節奏 ──────────────────────────────────────────────────────────────
+# 一次重連＝關掉舊 websocket + 重跑 tensoul 的 _connect()（3 個 HTTP 取版本/設定/路由表
+# ＋ websocket 握手），正常 1~2 秒。它用 aiohttp 的預設逾時（total 300s），碰到網路黑洞
+# 會整批凍結五分鐘才回報一次失敗，故每次嘗試都自行加上限。
+_RECONNECT_ATTEMPTS = 3
+_RECONNECT_TIMEOUT = 30.0
+_RECONNECT_BACKOFF = (1.0, 3.0, 6.0)
+# 整輪重連全滅（網路不通）後的等待重試節奏（秒）。網路中斷與「帳號全死」性質不同：
+# 前者等一下就會好，若比照後者直接中止，一次幾十秒的斷網就會把百萬筆的批次整個停掉。
+# 用完仍不通才升級為 AllAccountsFailed（呼叫端中止並寫斷點，下次執行自動續跑）。
+_NETWORK_RETRY_DELAYS = (5.0, 15.0, 30.0, 60.0)
 
 # ── 異常緩慢偵測 ──────────────────────────────────────────────────────────
 # 正常情況下 fetchGameRecord 約 0.4~0.6s/筆（實測台灣→CN）。實務上遇過整條 session
@@ -133,7 +167,7 @@ class AccountSession:
 
     notify(code, msg) 供呼叫端接事件（GUI 轉 bridge.notice、CLI 轉 print）；
     codes: VERSION_AUTO_UPDATING / VERSION_UPDATED / SESSION_RECOVERING /
-           ACCOUNT_SWITCHED / ACCOUNT_LOGIN_FAILED。
+           ACCOUNT_SWITCHED / ACCOUNT_LOGIN_FAILED / NETWORK_RETRY。
     """
 
     def __init__(self, downloader, accounts: list[dict], ini_paths=(), notify=None):
@@ -258,19 +292,55 @@ class AccountSession:
             offset = 1 if (force_switch and len(self.accounts) > 1) else 0
             self._ready.clear()
             try:
-                await self._login_any(start_offset=offset, reconnect=True)
+                await self._recover_locked(offset)
             finally:
                 # 失敗（含 AllAccountsFailed）也要放行，否則等柵欄的 worker 永久卡死；
                 # 放行後它們會自行失敗→recover→收到 AllAccountsFailed 而中止。
                 self._ready.set()
 
+    async def _recover_locked(self, offset: int) -> None:
+        """重連＋重登；連不上雀魂時等待後重試，而不是立刻宣告全滅。
+
+        分兩種失敗：帳號登入被拒（照舊輪替號池，全滅即 AllAccountsFailed），以及
+        **連不上伺服器**（NetworkUnavailable）——後者換帳號毫無意義，等網路回來才有用。"""
+        last_exc: BaseException | None = None
+        for delay in _NETWORK_RETRY_DELAYS + (None,):
+            try:
+                await self._login_any(start_offset=offset, reconnect=True)
+                return
+            except NetworkUnavailable as exc:
+                last_exc = exc
+                if delay is None:
+                    break
+                offset = 0  # 網路問題與帳號無關：重試時不再位移，續用原帳號
+                self._notify("NETWORK_RETRY", f"{delay:.0f}")
+                print(f"連不上雀魂（{exc}），{delay:.0f} 秒後重試")
+                await asyncio.sleep(delay)
+        raise ConnectionLost(f"連線持續失敗：{last_exc}")
+
     async def _reconnect(self) -> None:
-        """關閉並重開 websocket（換帳號或斷線後，舊連線狀態不可信）。"""
-        try:
-            await self.downloader.close()
-        except Exception:  # noqa: BLE001 舊連線已死也照樣重開
-            pass
-        await self.downloader.start()
+        """關閉並重開 websocket（換帳號或斷線後，舊連線狀態不可信）。
+
+        會就地重試數次：重連失敗多半是網路抖動或閘道抽壞，與「哪個帳號」無關，一次失敗
+        就往下輪帳號等於拿整個號池重試同一件事，最後 AllAccountsFailed 中止整批下載。
+        每次嘗試都設上限，避免 aiohttp 的 5 分鐘預設逾時把整批凍住。全滅拋
+        NetworkUnavailable，由 `_recover_locked` 等待後重試。"""
+        last_exc: BaseException | None = None
+        for attempt in range(_RECONNECT_ATTEMPTS):
+            try:
+                # 舊連線可能早已死（甚至關閉握手也會卡），關不掉照樣往下重開。
+                await asyncio.wait_for(self.downloader.close(), timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                await asyncio.wait_for(self.downloader.start(), timeout=_RECONNECT_TIMEOUT)
+                return
+            except Exception as exc:  # noqa: BLE001 下一次重試（或全滅後轉 NetworkUnavailable）
+                last_exc = exc
+                print(f"重新連線失敗（{attempt + 1}/{_RECONNECT_ATTEMPTS}）: {describe_error(exc)}")
+            if attempt + 1 < _RECONNECT_ATTEMPTS:
+                await asyncio.sleep(_RECONNECT_BACKOFF[min(attempt, len(_RECONNECT_BACKOFF) - 1)])
+        raise NetworkUnavailable(describe_error(last_exc))
 
     async def _login_any(self, start_offset: int, reconnect: bool) -> None:
         """自目前帳號（加位移）起輪一圈，跳過已死帳號；登入成功即返回。"""
@@ -283,13 +353,10 @@ class AccountSession:
             acct = self.accounts[idx]
             switched = idx != self._index
             self._index = idx
-            try:
-                if reconnect:
-                    await self._reconnect()
-            except Exception as exc:  # noqa: BLE001 重連失敗是網路問題，不算帳號死亡
-                last_exc = exc
-                print(f"重新連線失敗: {exc}")
-                continue
+            if reconnect:
+                # 連不上伺服器就直接往上拋（NetworkUnavailable）：那不是帳號的問題，
+                # 拿其他帳號重試同一條死掉的網路只會白白把號池輪空。
+                await self._reconnect()
             try:
                 await self._login_with_auto_update(acct)
             except Exception as exc:  # noqa: BLE001 換下一個帳號續試
@@ -298,14 +365,14 @@ class AccountSession:
                 # 握手被拒與帳號無關，若也標記為死，一次抖動就會把整個號池打光。
                 if is_auth_error(exc):
                     self._dead.add(idx)
-                print(f"帳號 {acct['username']} 登入失敗: {exc}")
+                print(f"帳號 {acct['username']} 登入失敗: {describe_error(exc)}")
                 self._notify("ACCOUNT_LOGIN_FAILED", acct["username"])
                 continue
             if switched:
                 print(f"已切換至帳號 {acct['username']}")
                 self._notify("ACCOUNT_SWITCHED", acct["username"])
             return
-        raise AllAccountsFailed(str(last_exc) if last_exc else "無可用帳號")
+        raise AllAccountsFailed(describe_error(last_exc) if last_exc else "無可用帳號")
 
     async def _login_with_auto_update(self, acct: dict) -> None:
         """登入單一帳號；遇 error 151（資源版本過期）自動抓最新版本重試並寫回 config.ini。"""
@@ -617,7 +684,8 @@ async def download_with_retry(session: AccountSession, download_fn, uuid: str,
         except asyncio.TimeoutError:
             log, timing, full, err = None, None, None, f"timeout after {timeout:.0f}s"
         except Exception as exc:  # noqa: BLE001 連線層例外也視為一次失敗
-            log, timing, full, err = None, None, None, str(exc)
+            # describe_error：連線層例外的 str() 常是空的，寫進斷點後會變成無從追查的空訊息。
+            log, timing, full, err = None, None, None, describe_error(exc)
         if log is not None:
             session.note_success()
             return log, timing, full, None
